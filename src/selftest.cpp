@@ -306,6 +306,24 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
         "she cannot be dragged off the screen");
   backend.resetPlace();
 
+  // A live KDE drag is driven by the global cursor, not MouseArea coordinates
+  // from a surface that is itself moving. Repeating a pointer position must
+  // not apply its travel again.
+  {
+    backend.injectCursor(200, 200);
+    backend.grabDrag();
+    const qreal before = backend.nx();
+    backend.injectCursor(450, 230);
+    const qreal moved = backend.nx();
+    backend.injectCursor(450, 230);
+    check(moved > before + 0.1,
+          "a global pointer sample moves Nala exactly once");
+    check(qAbs(backend.nx() - moved) < 0.001,
+          "a repeated global pointer sample does not reapply the drag");
+    backend.releaseDrag();
+    backend.resetPlace();
+  }
+
   // --- flight --------------------------------------------------------------
   //
   // Thrown hard enough she does not just drop: she tucks into a speck and

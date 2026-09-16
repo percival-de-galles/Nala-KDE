@@ -683,11 +683,19 @@ void Mascot::setHovered(bool hovered) {
 }
 
 void Mascot::lookAt(qreal x, qreal y) {
+  // The cursor is the main way she is interacted with; noticing it must also
+  // bring her back from a doze, or she looks broken after a minute of quiet.
+  wake();
   m_lookingAtCursor = true;
   // Turn the cursor's offset into an orientation. tanh keeps a cursor far off
   // to one side from pinning the gaze at the very limit of its travel.
-  m_yawTarget = std::tanh(x * 0.45) * kMaxYaw;
-  m_pitchTarget = std::tanh(y * 0.45) * kMaxPitch;
+  // A rectangular hyperbola rather than tanh. tanh is flat around zero, so a
+  // cursor within a body radius of her moved the eyes by almost nothing, and
+  // it is fully pinned a few hundred pixels out. This keeps responding at
+  // every distance and still approaches the limit without reaching it.
+  const auto glance = [](qreal v) { return v / (1.0 + std::abs(v)); };
+  m_yawTarget = glance(x) * kMaxYaw;
+  m_pitchTarget = glance(y) * kMaxPitch;
 }
 
 void Mascot::lookIdle() {

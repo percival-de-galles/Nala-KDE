@@ -143,6 +143,7 @@ Window {
         // chases the pointer, so the delta from this point is the movement --
         // no global coordinates needed, which a Wayland client cannot trust.
         property point origin: Qt.point(0, 0)
+        property point lastPosition: Qt.point(0, 0)
         property bool moved: false
 
         // Under test the desktop's real pointer must not perturb her state.
@@ -161,6 +162,7 @@ Window {
             }
             origin = Qt.point(mouse.x, mouse.y);
             moved = false;
+            lastPosition = origin;
             backend.grabDrag();
         }
 
@@ -169,11 +171,14 @@ Window {
                 return;
             const dx = mouse.x - origin.x;
             const dy = mouse.y - origin.y;
+            const stepX = mouse.x - lastPosition.x;
+            const stepY = mouse.y - lastPosition.y;
             // A few pixels of slop so a click is never mistaken for a drag.
             if (!moved && Math.abs(dx) + Math.abs(dy) < 4)
                 return;
             moved = true;
-            backend.dragBy(dx, dy);
+            lastPosition = Qt.point(mouse.x, mouse.y);
+            backend.dragBy(stepX, stepY);
         }
 
         onReleased: function (mouse) {

@@ -1,9 +1,13 @@
 #include "cursor.h"
+#include <QCursor>
+#include <QDBusConnection>
+#include <QGuiApplication>
 #include <QLocalSocket>
 #include <QProcessEnvironment>
 #include <unistd.h>
 
 Cursor::Cursor(QObject *parent) : QObject(parent) {
+  m_nativeGlobal = QGuiApplication::platformName() == QStringLiteral("xcb");
   const auto env = QProcessEnvironment::systemEnvironment();
   const QString signature = env.value("HYPRLAND_INSTANCE_SIGNATURE");
   const QString runtime = env.value(
@@ -14,19 +18,32 @@ Cursor::Cursor(QObject *parent) : QObject(parent) {
 
   m_timer.setInterval(55); // ~18 Hz: smooth for a glance, invisible in `top`
   connect(&m_timer, &QTimer::timeout, this, &Cursor::poll);
+
+  // This is intentionally best-effort: on non-KDE desktops no caller exists
+  // and the existing compositor/X11 paths remain the fallback.
+  if (QDBusConnection::sessionBus().registerService("org.nala.Cursor"))
+    QDBusConnection::sessionBus().registerObject(
+        "/Cursor", this, QDBusConnection::ExportAllSlots);
 }
 
 void Cursor::setActive(bool active) {
   if (m_active == active)
     return;
   m_active = active;
-  if (active && !m_socket.isEmpty()) {
+  if (active && (m_nativeGlobal || !m_socket.isEmpty())) {
     m_failures = 0;
     m_timer.start();
     poll();
   } else {
     m_timer.stop();
   }
+}
+
+void Cursor::setPollInterval(int ms) { m_timer.setInterval(ms); }
+
+void Cursor::refresh() {
+  if (m_active && (m_nativeGlobal || !m_socket.isEmpty()))
+    poll();
 }
 
 void Cursor::setAvailable(bool available) {
@@ -37,6 +54,19 @@ void Cursor::setAvailable(bool available) {
 }
 
 void Cursor::poll() {
+  // Do not overwrite fresh compositor coordinates with XWayland's partial
+  // pointer view.  Fall back if the KWin script is later stopped.
+  if (m_compositorClock.isValid() && m_compositorClock.elapsed() < 500)
+    return;
+
+  if (m_nativeGlobal) {
+    const QPoint position = QCursor::pos();
+    m_failures = 0;
+    setAvailable(true);
+    report(position);
+    return;
+  }
+
   QLocalSocket socket;
   socket.connectToServer(m_socket);
   if (!socket.waitForConnected(20)) {
@@ -70,12 +100,24 @@ void Cursor::poll() {
   const QPoint position(x, y);
   if (position == m_position)
     return;
-  m_position = position;
-  emit moved(m_position);
+  report(position);
 }
 
 void Cursor::inject(QPoint position) {
   setAvailable(true);
+  m_position = position;
+  emit moved(m_position);
+}
+
+void Cursor::setCompositorPosition(int x, int y) {
+  m_compositorClock.restart();
+  setAvailable(true);
+  report(QPoint(x, y));
+}
+
+void Cursor::report(QPoint position) {
+  if (position == m_position)
+    return;
   m_position = position;
   emit moved(m_position);
 }

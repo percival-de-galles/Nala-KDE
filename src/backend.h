@@ -119,8 +119,18 @@ private:
   QString m_feedback;
   QTimer m_saveTimer;
 
-  // Drag bookkeeping.
+  // Drag bookkeeping. The drag is absolute: it is derived from the global
+  // pointer position, which does not depend on where the compositor has
+  // actually put the surface. A delta measured in the surface's own
+  // coordinates cannot be trusted, because the applied position lags the
+  // requested one and is not observable from the client.
   bool m_dragging = false;
+  QPoint m_grabOffset;
+  QPoint m_lastSample;
+  qint64 m_lastSampleMs = 0;
+  bool m_haveSample = false;
+  void beginPointerDrag(QPoint position);
+  void dragToCursor(QPoint position);
   qreal m_dragSpeed = 0.0;
   QPointF m_dragVelocity;   // pixels per second, smoothed
   QElapsedTimer m_dragClock;

@@ -11,11 +11,20 @@
 #include <QJsonDocument>
 #include <QQuickWindow>
 #include <QRandomGenerator>
+#include <cstdlib>
 #include <iterator>
 #include <QRegion>
 #include <QSaveFile>
 #include <QScreen>
 #include <QStandardPaths>
+
+#ifdef NALA_HAVE_XCB
+#ifdef NALA_HAVE_XCB_SHAPE
+#include <xcb/shape.h>
+#endif
+#include <QtGui/qguiapplication_platform.h>
+#include <xcb/xcb.h>
+#endif
 
 #ifdef NALA_HAVE_LAYER_SHELL
 #include <LayerShellQt/Window>
@@ -42,7 +51,72 @@ QString autostartPath() {
          "/autostart/nala.desktop";
 }
 
+bool moveX11Window(QWindow *window, int x, int y) {
+#ifdef NALA_HAVE_XCB
+  if (QGuiApplication::platformName() != QStringLiteral("xcb"))
+    return false;
+  if (auto *native =
+          qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+    const uint32_t values[]{uint32_t(x), uint32_t(y)};
+    xcb_configure_window(native->connection(), window->winId(),
+                         XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
+    xcb_flush(native->connection());
+    return true;
+  }
+#endif
+  return false;
+}
+
+bool x11WindowCentre(QWindow *window, QPointF *centre) {
+#ifdef NALA_HAVE_XCB
+  if (QGuiApplication::platformName() != QStringLiteral("xcb"))
+    return false;
+  if (auto *native =
+          qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+    xcb_connection_t *connection = native->connection();
+    const xcb_screen_t *screen =
+        xcb_setup_roots_iterator(xcb_get_setup(connection)).data;
+    const auto cookie = xcb_translate_coordinates(
+        connection, window->winId(), screen->root, 0, 0);
+    xcb_translate_coordinates_reply_t *reply =
+        xcb_translate_coordinates_reply(connection, cookie, nullptr);
+    if (!reply)
+      return false;
+    *centre = QPointF(reply->dst_x + window->width() * 0.5,
+                      reply->dst_y + window->height() * 0.5);
+    std::free(reply);
+    return true;
+  }
+#endif
+  return false;
+}
+
 } // namespace
+bool setX11InputRegion(QWindow *window, const QRegion &region) {
+#if defined(NALA_HAVE_XCB) && defined(NALA_HAVE_XCB_SHAPE)
+  if (QGuiApplication::platformName() != QStringLiteral("xcb"))
+    return false;
+  if (auto *native =
+          qGuiApp->nativeInterface<QNativeInterface::QX11Application>()) {
+    QVector<xcb_rectangle_t> rectangles;
+    rectangles.reserve(region.rectCount());
+    for (const QRect &rect : region)
+      rectangles.push_back({int16_t(rect.x()), int16_t(rect.y()),
+                            uint16_t(rect.width()), uint16_t(rect.height())});
+    xcb_shape_rectangles(native->connection(), XCB_SHAPE_SO_SET,
+                         XCB_SHAPE_SK_INPUT, XCB_CLIP_ORDERING_UNSORTED,
+                         window->winId(), 0, 0, rectangles.size(),
+                         rectangles.constData());
+    xcb_flush(native->connection());
+    return true;
+  }
+#else
+  Q_UNUSED(window);
+  Q_UNUSED(region);
+#endif
+  return false;
+}
+
 
 Backend::Backend(QString configPath, bool preview, bool testing, Mascot *mascot,
                  Theme *theme, Cursor *cursor, QObject *parent)
@@ -53,7 +127,6 @@ Backend::Backend(QString configPath, bool preview, bool testing, Mascot *mascot,
   connect(&m_saveTimer, &QTimer::timeout, this, &Backend::save);
 
   load();
-  applyToMascot();
 
   if (m_theme)
     connect(m_theme, &Theme::changed, this, [this] { emit changed(); });
@@ -62,14 +135,30 @@ Backend::Backend(QString configPath, bool preview, bool testing, Mascot *mascot,
     connect(m_cursor, &Cursor::moved, this, [this](QPoint position) {
       if (!m_followCursor)
         return;
+      // Scale the gaze to the screen, not to her body. Normalising by her
+      // 58 px radius spends 96% of the eye travel within 232 px and leaves
+      // the rest of a desktop with no response at all, which reads as the
+      // eyes being frozen in one pose.
       const qreal radius = bodyRadius();
       if (radius <= 0.0)
         return;
       const QPointF centre = centreOnScreen();
-      m_mascot->lookAt((position.x() - centre.x()) / radius,
-                       (position.y() - centre.y()) / radius);
+      // A fixed distance, tied to her size rather than to the desktop: scaling
+      // the gain by the screen made the response depend on the monitor layout,
+      // which is why it felt right at one distance and wrong either side of it.
+      // Half a glance lands at three body radii and keeps climbing after that.
+      const qreal gain = std::max(1.0, radius * 3.0);
+      m_mascot->lookAt((position.x() - centre.x()) / gain,
+                       (position.y() - centre.y()) / gain);
     });
+
+    if (m_mascot)
+      connect(m_cursor, &Cursor::moved, this, &Backend::dragToCursor);
   }
+
+  // Connect before applying preferences: setActive() polls once synchronously,
+  // and the position it reports must reach the mascot.
+  applyToMascot();
 
   if (!m_testing) {
     connect(qApp, &QGuiApplication::screenAdded, this,
@@ -225,7 +314,12 @@ QPointF Backend::centreOnScreen() const {
   // An ordinary window is placed by the compositor, so ask it where it ended
   // up. A layer-shell surface is not: its QWindow coordinates say nothing
   // about where the shell actually put it, so use the placement we asked for.
-  if (m_window && !m_layered)
+  QPointF nativeCentre;
+  if (m_window && !m_layered && x11WindowCentre(m_window, &nativeCentre))
+    return nativeCentre;
+
+  if (m_window && !m_layered &&
+      QGuiApplication::platformName() != QStringLiteral("xcb"))
     return QPointF(m_window->x() + m_window->width() * 0.5,
                    m_window->y() + m_window->height() * 0.5);
 
@@ -241,6 +335,12 @@ void Backend::attach(QQuickWindow *window) {
   if (!m_window)
     return;
 
+#ifdef NALA_HAVE_XCB
+  if (QGuiApplication::platformName() == QStringLiteral("xcb") &&
+      qGuiApp->nativeInterface<QNativeInterface::QX11Application>())
+    m_window->setFlag(Qt::X11BypassWindowManagerHint, true);
+#endif
+
   m_window->setFlag(Qt::FramelessWindowHint, true);
   m_window->setColor(Qt::transparent);
 
@@ -248,7 +348,8 @@ void Backend::attach(QQuickWindow *window) {
   // Must happen while the window is still hidden: LayerShellQt can only give a
   // QWindow the layer-surface role before its platform surface exists. This is
   // what makes Nala a free-floating companion instead of a tiled window.
-  if (!m_preview) {
+  if (!m_preview &&
+      QGuiApplication::platformName() == QStringLiteral("wayland")) {
     if (auto *layer = LayerShellQt::Window::get(m_window)) {
       layer->setScope(QStringLiteral("nala"));
       layer->setAnchors({LayerShellQt::Window::AnchorTop |
@@ -264,6 +365,8 @@ void Backend::attach(QQuickWindow *window) {
 
   applyPlacement();
   m_window->setVisible(true);
+  if (!m_layered)
+    QTimer::singleShot(100, this, [this] { applyPlacement(); });
   applyInputRegion(false);
 }
 
@@ -283,6 +386,11 @@ void Backend::applyPlacement() {
       for (QScreen *candidate : QGuiApplication::screens())
         if (!m_monitor.isEmpty() && candidate->name() == m_monitor)
           target = candidate;
+      // Always name an output. Left to itself the compositor may choose any
+      // screen, and a client is never told which one it got, so
+      // centreOnScreen() would then be a monitor out and the gaze with it.
+      if (!target)
+        target = QGuiApplication::primaryScreen();
       if (target)
         layer->setScreen(target);
 
@@ -301,7 +409,9 @@ void Backend::applyPlacement() {
 
   if (m_window->width() != extent || m_window->height() != extent)
     m_window->resize(extent, extent);
-  m_window->setPosition(screen.x() + x, screen.y() + y);
+  const QPoint position(screen.x() + x, screen.y() + y);
+  m_window->setPosition(position);
+  moveX11Window(m_window, position.x(), position.y());
   applyInputRegion(m_dragging);
 }
 
@@ -315,7 +425,9 @@ void Backend::applyInputRegion(bool wholeWindow) {
   if (wholeWindow) {
     // While she is being dragged the pointer wanders outside her silhouette;
     // widen the input region so the motion and the release still arrive.
-    m_window->setMask(QRegion(0, 0, extent, extent));
+    const QRegion region(0, 0, extent, extent);
+    if (!setX11InputRegion(m_window, region))
+      m_window->setMask(region);
     return;
   }
 
@@ -323,7 +435,9 @@ void Backend::applyInputRegion(bool wholeWindow) {
   // margin around her stays click-through and never blocks the desktop.
   const int body = int(std::lround(extent / kCanvasToBody));
   const int inset = (extent - body) / 2;
-  m_window->setMask(QRegion(inset, inset, body, body, QRegion::Ellipse));
+  const QRegion region(inset, inset, body, body, QRegion::Ellipse);
+  if (!setX11InputRegion(m_window, region))
+    m_window->setMask(region);
 }
 
 void Backend::resetPlace() {
@@ -343,13 +457,95 @@ void Backend::grabDrag() {
   m_dragSpeed = 0.0;
   m_dragVelocity = QPointF();
   m_dragClock.restart();
+  m_haveSample = false;
+
+  // Ask for the global pointer at mouse-event rate. Where the compositor has
+  // actually put the surface does not enter into it.
+  if (m_cursor) {
+    m_cursor->setPollInterval(8);
+    m_cursor->setActive(true);
+    m_cursor->refresh();
+    if (m_cursor->available())
+      beginPointerDrag(m_cursor->position());
+  }
   applyInputRegion(true);
   if (m_mascot)
     m_mascot->beginDrag();
 }
 
+// Follow the global pointer. Because this never consults the surface's own
+// coordinates it cannot feed back on itself: a compositor that applies the new
+// margin late changes where the window *is*, not where the pointer is.
+void Backend::beginPointerDrag(QPoint position) {
+  const QPointF centre = centreOnScreen();
+  const int extent = m_window->width();
+  m_grabOffset = position -
+                 QPoint(qRound(centre.x() - extent * 0.5),
+                        qRound(centre.y() - extent * 0.5));
+  m_lastSample = position;
+  m_lastSampleMs = m_dragClock.isValid() ? m_dragClock.elapsed() : 0;
+  m_haveSample = true;
+}
+
+void Backend::dragToCursor(QPoint position) {
+  if (!m_dragging || !m_window)
+    return;
+
+  if (!m_haveSample) {
+    beginPointerDrag(position);
+    return;
+  }
+
+  const int extent = m_window->width();
+  const QPoint wantedTopLeft = position - m_grabOffset;
+  QScreen *screen = QGuiApplication::screenAt(
+      wantedTopLeft + QPoint(extent / 2, extent / 2));
+  if (!screen)
+    screen = QGuiApplication::screenAt(position);
+  if (!screen)
+    screen = QGuiApplication::primaryScreen();
+  if (!screen)
+    return;
+
+  m_monitor = screen->name();
+  const QRect geometry = screen->geometry();
+  const qreal spanX = std::max(1, geometry.width() - extent);
+  const qreal spanY = std::max(1, geometry.height() - extent);
+  const QPoint local = wantedTopLeft - geometry.topLeft();
+
+  // Velocity from real positions and real intervals, so a pause before the
+  // release reads as a drop rather than a throw.
+  const qint64 now = m_dragClock.isValid() ? m_dragClock.elapsed() : 0;
+  const qreal dt = (now - m_lastSampleMs) / 1000.0;
+  if (dt >= 0.2)
+    m_dragVelocity = QPointF();
+  else if (dt > 0.004)
+    m_dragVelocity =
+        m_dragVelocity * 0.5 +
+        QPointF((position.x() - m_lastSample.x()) / dt,
+                (position.y() - m_lastSample.y()) / dt) *
+            0.5;
+  m_dragSpeed = 0.6 * m_dragSpeed +
+                0.4 * std::hypot(qreal(position.x() - m_lastSample.x()),
+                                 qreal(position.y() - m_lastSample.y()));
+  m_lastSample = position;
+  m_lastSampleMs = now;
+
+  const QPointF next(qBound(0.0, local.x() / spanX, 1.0),
+                     qBound(0.0, local.y() / spanY, 1.0));
+  if (next == m_place)
+    return;
+  m_place = next;
+  applyPlacement();
+  emit changed();
+}
+
 void Backend::dragBy(qreal dx, qreal dy) {
   if (!m_dragging || !m_window)
+    return;
+  // With a live global pointer the deltas are ignored entirely; they are only
+  // a fallback for a session with no bridge.
+  if (m_cursor && m_cursor->available())
     return;
 
   const QRect screen = screenGeometry();
@@ -381,6 +577,11 @@ void Backend::releaseDrag() {
     return;
   m_dragging = false;
   applyInputRegion(false);
+
+  if (m_cursor) {
+    m_cursor->setPollInterval(55);
+    m_cursor->setActive(m_followCursor && !m_testing);
+  }
 
   // Let go of her hard enough and she does not just drop -- she streaks off.
   const qreal speed = std::hypot(m_dragVelocity.x(), m_dragVelocity.y());

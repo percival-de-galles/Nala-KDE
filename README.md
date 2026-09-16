@@ -14,6 +14,10 @@ changes.
 - A Wayland compositor supporting `wlr-layer-shell`; developed on Hyprland
 - Noctalia — optional; without it Nala falls back to her own dark palette
 
+For KDE Plasma Wayland, the supported overlay build and setup guide are in
+[docs/kde.md](docs/kde.md). It uses an XWayland overlay plus a small KWin
+cursor bridge, while keeping the same upstream behavior model.
+
 ## Build and run
 
 ```bash

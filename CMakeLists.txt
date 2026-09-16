@@ -4,10 +4,12 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Widgets Quick Qml ShaderTools Test)
+find_package(Qt6 6.10 REQUIRED COMPONENTS Core Gui Widgets Quick Qml ShaderTools Test DBus)
 # Wayland overlay placement on Hyprland. Optional so the app still builds and
 # runs (as a plain floating window) on compositors without layer-shell.
 find_package(LayerShellQt 6.7 QUIET CONFIG)
+find_package(X11 QUIET COMPONENTS xcb)
+find_library(XCB_SHAPE_LIB xcb-shape)
 
 qt_add_executable(nala
   src/main.cpp
@@ -29,13 +31,23 @@ qt_add_resources(nala "ui" PREFIX / FILES
   assets/nala.svg)
 
 target_link_libraries(nala PRIVATE
-  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::Test)
+  Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Quick Qt6::Qml Qt6::Test Qt6::DBus)
 
 if(LayerShellQt_FOUND)
   target_link_libraries(nala PRIVATE LayerShellQt::Interface)
   target_compile_definitions(nala PRIVATE NALA_HAVE_LAYER_SHELL
     LAYERSHELLQTINTERFACE_DISABLE_DEPRECATED_BEFORE_AND_AT=0x060600)
 endif()
+
+if(X11_xcb_FOUND)
+  target_link_libraries(nala PRIVATE X11::xcb)
+  target_compile_definitions(nala PRIVATE NALA_HAVE_XCB)
+endif()
+if(XCB_SHAPE_LIB)
+  target_link_libraries(nala PRIVATE ${XCB_SHAPE_LIB})
+  target_compile_definitions(nala PRIVATE NALA_HAVE_XCB_SHAPE)
+endif()
+
 
 target_compile_options(nala PRIVATE -Wall -Wextra -Wpedantic)
 
