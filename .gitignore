@@ -1,5 +1,51 @@
+# Build output
 build/
 build-*/
-.cache/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
 compile_commands.json
+.cache/
+.qsb/
+
+# Qt and QML generated sources
+*.qmlc
+*.jsc
+.qmake.stash
+moc_*.cpp
+qrc_*.cpp
+*.qsb
+
+# Editors and desktop clutter
 *.user
+*.autosave
+*.swp
+*~
+.vscode/
+.idea/
+.DS_Store
+
+# Screenshots, captures and recordings.
+#
+# --poses, --film and --capture-dir all write inside build/, which is already
+# ignored, but this keeps stray captures out of the tree wherever they land.
+# Project artwork belongs in assets/; anything else has to be added on purpose
+# with `git add -f`.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.webp
+*.bmp
+*.mp4
+*.mkv
+*.webm
+*.mov
+!assets/**
+
+# Local configuration and anything secret
+*.local
+.env
+*.pem
+*.key
