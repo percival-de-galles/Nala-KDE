@@ -93,6 +93,8 @@ void Mascot::settle(qreal &value, qreal target, qreal dt, qreal rate) const {
 // asymmetry the reference shows (the pair measures -0.02 tilt looking up and
 // +0.13 level). Pitch-then-yaw would keep the pair perfectly level.
 void Mascot::placeEyes() {
+  const qreal previousLeftLid = m_left.lid;
+  const qreal previousRightLid = m_right.lid;
   const qreal cy = std::cos(m_yaw), sy = std::sin(m_yaw);
   const qreal cp = std::cos(m_pitch), sp = std::sin(m_pitch);
 
@@ -134,6 +136,11 @@ void Mascot::placeEyes() {
 
   m_left = carry(-1.0);
   m_right = carry(1.0);
+
+  // Carry the lids over: placeEyes() rebuilds the eyes from scratch each
+  // frame, so reapply how far each one is shut.
+  m_left.lid = previousLeftLid;
+  m_right.lid = previousRightLid;
 
   // Damp the tilt towards the pair's own level without disturbing where the
   // pair as a whole is looking.
@@ -224,6 +231,27 @@ void Mascot::advanceMorph(qreal dt) {
 // much as 6.4 s apart.
 void Mascot::scheduleBlink() { m_nextBlink = random(0.7, 5.2); }
 
+// How far shut the lid is at this point in a blink: 0 open, 1 shut.
+qreal Mascot::lidFor(qreal phase) const {
+  qreal closed;
+  if (phase < kBlinkClose)
+    closed = phase / kBlinkClose;
+  else if (phase < kBlinkHold)
+    closed = 1.0;
+  else
+    closed = 1.0 - (phase - kBlinkHold) / (1.0 - kBlinkHold);
+  return easeInOut(closed);
+}
+
+// One eye squeezed shut and held, the way the reference holds it for a good
+// two or three seconds before blinking out of it.
+void Mascot::wink() {
+  wake();
+  if (m_mood != Resting || m_winkHold >= 0.0)
+    return;
+  m_winkHold = random(1.8, 3.2);
+}
+
 void Mascot::advanceBlink(qreal dt) {
   if (m_mood == Asleep)
     return;
@@ -260,8 +288,12 @@ void Mascot::advanceIdle(qreal dt) {
 
   // A small repertoire of things to do when left alone, weighted towards the
   // quiet ones so she never feels busy.
-  const int pick = int(random(0.0, 10.0));
-  if (pick < 3) {
+  const int pick = int(random(0.0, 12.0));
+  if (pick == 11) {
+    scatter();
+  } else if (pick == 10) {
+    wink();
+  } else if (pick < 3) {
     m_yawTarget = random(-kMaxYaw * 0.75, kMaxYaw * 0.85);
     m_pitchTarget = random(-kMaxPitch * 0.8, kMaxPitch * 0.55);
     m_lookingAtCursor = false;
@@ -280,6 +312,82 @@ void Mascot::advanceIdle(qreal dt) {
   }
 }
 
+QVariantList Mascot::droplets() const {
+  QVariantList list;
+  list.reserve(m_droplets.size());
+  for (const Droplet &drop : m_droplets) {
+    // Fade over the back half of a droplet's life, as the reference's do.
+    const qreal t = drop.span > 0.0 ? drop.life / drop.span : 0.0;
+    list.append(QVariantMap{{"x", drop.position.x()},
+                            {"y", drop.position.y()},
+                            {"radius", drop.radius},
+                            {"opacity", qBound(0.0, t * 1.8, 1.0)}});
+  }
+  return list;
+}
+
+// She comes apart: the body collapses to a speck and throws off a handful of
+// droplets, which drift outward, slow down and fade.
+void Mascot::scatter() {
+  wake();
+  setMood(Happy);
+  m_droplets.clear();
+
+  const int count = 5 + int(random(0.0, 2.0));
+  for (int i = 0; i < count; ++i) {
+    Droplet drop;
+    const qreal angle = random(0.0, 2.0 * M_PI);
+    const qreal speed = random(0.9, 2.3);
+    drop.position = QPointF(std::cos(angle) * 0.12, std::sin(angle) * 0.12);
+    drop.velocity = QPointF(std::cos(angle) * speed, std::sin(angle) * speed);
+    // One or two proper blobs among several specks, as in the reference.
+    drop.radius = i < 2 ? random(0.035, 0.06) : random(0.008, 0.025);
+    drop.span = drop.life = random(0.5, 1.1);
+    m_droplets.append(drop);
+  }
+
+  morphTo(Tiny, 0.22);
+  m_scale = 1.0;
+  m_scaleVelocity = -1.4;
+  m_scaleTarget = 1.0;
+  m_hold = 1.5;
+}
+
+// She tucks herself into a speck and streaks off. The backend moves the
+// window; all this does is make her look like something in flight.
+void Mascot::beginDash(qreal angle, qreal speed) {
+  wake();
+  setMood(Dashing);
+  m_hold = 0.0;
+  m_dashAngle = angle;
+  m_dashSpeed = qBound(0.0, speed, 1.0);
+  morphTo(Tiny, 0.16);
+  m_squashXTarget = m_squashYTarget = 1.0;
+  m_scaleTarget = 1.0;
+}
+
+void Mascot::updateDash(qreal angle, qreal speed) {
+  if (m_mood != Dashing)
+    return;
+  m_dashAngle = angle;
+  m_dashSpeed = qBound(0.0, speed, 1.0);
+}
+
+void Mascot::endDash() {
+  if (m_mood != Dashing)
+    return;
+  setMood(Resting);
+  m_dashSpeed = 0.0;
+  m_idle = 0.0;
+  morphTo(Circle, 0.26);
+  // Arrive with a bounce, the way she does at the end of the reference's dash.
+  m_scale = 0.72;
+  m_scaleVelocity = 2.2;
+  m_scaleTarget = 1.0;
+  m_yawTarget = kRestYaw;
+  m_pitchTarget = kRestPitch;
+}
+
 void Mascot::tick(qreal dt) {
   dt = qBound(0.0, dt, 0.1); // survive a stalled frame without a lurch
   m_time += dt;
@@ -290,6 +398,20 @@ void Mascot::tick(qreal dt) {
   advanceMorph(dt);
   advanceBlink(dt);
   advanceIdle(dt);
+
+  // Droplets: thrown clear, slowed by drag, gone when their life runs out.
+  if (!m_droplets.isEmpty()) {
+    for (Droplet &drop : m_droplets) {
+      drop.life -= dt;
+      drop.position += drop.velocity * dt;
+      drop.velocity *= std::max(0.0, 1.0 - 2.6 * dt);
+    }
+    m_droplets.erase(std::remove_if(m_droplets.begin(), m_droplets.end(),
+                                    [](const Droplet &d) {
+                                      return d.life <= 0.0;
+                                    }),
+                     m_droplets.end());
+  }
 
   // Mood timers.
   if (m_hold > 0.0) {
@@ -351,21 +473,28 @@ void Mascot::tick(qreal dt) {
   settle(m_eyeWidth, m_eyeWidthTarget, dt, 13.0);
   settle(m_eyeRound, m_eyeRoundTarget, dt, 10.0);
 
-  if (m_blinkPhase >= 0.0) {
-    const qreal t = m_blinkPhase;
-    qreal closed; // 0 = wide open, 1 = shut
-    if (t < kBlinkClose)
-      closed = t / kBlinkClose;
-    else if (t < kBlinkHold)
-      closed = 1.0;
-    else
-      closed = 1.0 - (t - kBlinkHold) / (1.0 - kBlinkHold);
-    // Drive the lid directly: the curve above *is* the timing, so smoothing it
-    // again would stretch the blink past the 243 ms it is supposed to take.
-    m_eyeHeight = m_eyeHeightTarget * (1.0 - easeInOut(closed));
+  settle(m_eyeHeight, m_eyeHeightTarget, dt, 13.0);
+
+  // Lids. A blink shuts both; a wink shuts one and holds it. They are applied
+  // per eye rather than to the shared height so the two can differ.
+  const qreal blinkLid = m_blinkPhase >= 0.0 ? lidFor(m_blinkPhase) : 0.0;
+  if (m_winkHold >= 0.0) {
+    m_winkHold -= dt;
+    // Squeezed, not shut: the reference leaves a clear horizontal dash rather
+    // than closing the eye away altogether, which is what separates a wink
+    // from a blink.
+    settle(m_winkLid, 0.86, dt, 18.0);
+    if (m_winkHold <= 0.0) {
+      m_winkHold = -1.0;
+      m_blinkPhase = 0.0; // she blinks as she comes out of it, as in the video
+    }
   } else {
-    settle(m_eyeHeight, m_eyeHeightTarget, dt, 13.0);
+    settle(m_winkLid, 0.0, dt, 14.0);
   }
+  m_left.lid = std::max(blinkLid, 0.0);
+  m_right.lid = std::max(blinkLid, m_winkLid);
+  // A squeezed eye spreads sideways as it flattens.
+  m_right.scale.setX(m_right.scale.x() * (1.0 + 0.3 * m_winkLid));
 
   // Idle float and the decaying shake that follows an alert.
   if (m_reduced) {
@@ -381,6 +510,12 @@ void Mascot::tick(qreal dt) {
     m_bobX += shake * 0.05;
     m_roll += shake * 0.16;
   }
+
+  // The trail lags the speed a little, so it streams out as she gets going
+  // and lingers for a moment when she stops.
+  settle(m_dashLength, m_mood == Dashing ? 0.35 + 0.65 * m_dashSpeed : 0.0, dt,
+         m_mood == Dashing ? 11.0 : 6.0);
+  settle(m_dashIntensity, m_mood == Dashing ? 1.0 : 0.0, dt, 9.0);
 
   // Slow tumble while she is thinking.
   if (m_rings > 0.02 && !m_reduced)
@@ -553,6 +688,8 @@ void Mascot::rest() {
   m_idle = 0.0;
   m_wobble = 0.0;
   m_rings = m_ringsTarget = 0.0;
+  m_dashSpeed = m_dashLength = m_dashIntensity = 0.0;
+  m_droplets.clear();
   m_badge = m_badgeTarget = 0.0;
   m_dotsSpread = m_dotsSpreadTarget = 0.0;
   m_dotsShrink = m_dotsShrinkTarget = 0.0;

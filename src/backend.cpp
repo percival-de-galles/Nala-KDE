@@ -10,6 +10,7 @@
 #include <QGuiApplication>
 #include <QJsonDocument>
 #include <QQuickWindow>
+#include <QRandomGenerator>
 #include <QRegion>
 #include <QSaveFile>
 #include <QScreen>
@@ -29,6 +30,11 @@ constexpr qreal kMaxSize = 2.20;
 // clipped. The reference reel uses the same headroom.
 constexpr qreal kCanvasToBody = 1.89; // 1 / 0.529, the measured body radius
 constexpr int kBaseBody = 116; // logical pixels at size 1.0
+
+// Flight. Below this release speed she simply drops where she is put.
+constexpr qreal kThrowSpeed = 900.0; // pixels per second
+constexpr qreal kDrag = 1.5;         // per second
+constexpr qreal kBounce = 0.62;      // energy kept when she hits an edge
 
 QString autostartPath() {
   return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
@@ -332,7 +338,10 @@ void Backend::grabDrag() {
   if (!m_window || m_dragging)
     return;
   m_dragging = true;
+  m_flying = false;
   m_dragSpeed = 0.0;
+  m_dragVelocity = QPointF();
+  m_dragClock.restart();
   applyInputRegion(true);
   if (m_mascot)
     m_mascot->beginDrag();
@@ -353,6 +362,15 @@ void Backend::dragBy(qreal dx, qreal dy) {
   // Exponential average: a single jittery event should not read as a throw.
   m_dragSpeed = m_dragSpeed * 0.6 + std::hypot(dx, dy) * 0.4;
 
+  // Velocity needs the interval between events, not just their size -- the
+  // same 20 px means very different things 5 ms and 80 ms apart.
+  const qreal elapsed =
+      m_dragClock.isValid() ? m_dragClock.restart() / 1000.0 : 0.0;
+  if (elapsed > 0.001 && elapsed < 0.2) {
+    const QPointF sample(dx / elapsed, dy / elapsed);
+    m_dragVelocity = m_dragVelocity * 0.55 + sample * 0.45;
+  }
+
   applyPlacement();
   emit changed();
 }
@@ -362,9 +380,78 @@ void Backend::releaseDrag() {
     return;
   m_dragging = false;
   applyInputRegion(false);
+
+  // Let go of her hard enough and she does not just drop -- she streaks off.
+  const qreal speed = std::hypot(m_dragVelocity.x(), m_dragVelocity.y());
+  if (speed > kThrowSpeed) {
+    launch(m_dragVelocity.x(), m_dragVelocity.y(), speed);
+    return;
+  }
+
   if (m_mascot)
     m_mascot->endDrag(qBound(0.0, m_dragSpeed / 26.0, 1.0));
   m_saveTimer.start();
+}
+
+void Backend::launch(qreal dx, qreal dy, qreal speed) {
+  if (!m_window)
+    return;
+  const QRect screen = screenGeometry();
+  const int extent = m_window->width();
+  const qreal spanX = std::max(1, screen.width() - extent);
+  const qreal spanY = std::max(1, screen.height() - extent);
+
+  m_flying = true;
+  m_dragging = false;
+  // Convert pixels per second into the place fractions the window moves in.
+  m_flightVelocity = QPointF(dx / spanX, dy / spanY);
+  if (m_mascot)
+    m_mascot->beginDash(std::atan2(-dy, dx),
+                        qBound(0.0, speed / (kThrowSpeed * 4.0), 1.0));
+}
+
+void Backend::advance(qreal dt) {
+  if (!m_flying || !m_window)
+    return;
+
+  const QRect screen = screenGeometry();
+  const int extent = m_window->width();
+  const qreal spanX = std::max(1.0, qreal(screen.width() - extent));
+  const qreal spanY = std::max(1.0, qreal(screen.height() - extent));
+
+  QPointF place = m_place + m_flightVelocity * dt;
+
+  // Bounce off the edges of the screen rather than sticking to them.
+  if (place.x() < 0.0 || place.x() > 1.0) {
+    place.setX(qBound(0.0, place.x() < 0.0 ? -place.x() : 2.0 - place.x(), 1.0));
+    m_flightVelocity.setX(-m_flightVelocity.x() * kBounce);
+  }
+  if (place.y() < 0.0 || place.y() > 1.0) {
+    place.setY(qBound(0.0, place.y() < 0.0 ? -place.y() : 2.0 - place.y(), 1.0));
+    m_flightVelocity.setY(-m_flightVelocity.y() * kBounce);
+  }
+  m_place = place;
+
+  // Air resistance.
+  m_flightVelocity *= std::max(0.0, 1.0 - kDrag * dt);
+
+  const qreal pixelsPerSecond =
+      std::hypot(m_flightVelocity.x() * spanX, m_flightVelocity.y() * spanY);
+  if (m_mascot)
+    m_mascot->updateDash(
+        std::atan2(-m_flightVelocity.y() * spanY, m_flightVelocity.x() * spanX),
+        qBound(0.0, pixelsPerSecond / (kThrowSpeed * 4.0), 1.0));
+
+  applyPlacement();
+  emit changed();
+
+  if (pixelsPerSecond < kThrowSpeed * 0.35) {
+    m_flying = false;
+    m_flightVelocity = QPointF();
+    if (m_mascot)
+      m_mascot->endDash();
+    m_saveTimer.start();
+  }
 }
 
 void Backend::injectCursor(int x, int y) {
@@ -393,6 +480,16 @@ void Backend::command(const QString &name) {
     m_mascot->wake();
   else if (name == "rest")
     m_mascot->rest();
+  else if (name == "wink")
+    m_mascot->wink();
+  else if (name == "scatter")
+    m_mascot->scatter();
+  else if (name == "dash") {
+    // Off in some direction of her own choosing.
+    const qreal angle = QRandomGenerator::global()->generateDouble() * 2 * M_PI;
+    launch(std::cos(angle) * kThrowSpeed * 2.2,
+           std::sin(angle) * kThrowSpeed * 2.2, kThrowSpeed * 2.2);
+  }
   else if (name == "settings")
     openSettings();
   else if (name == "reset")

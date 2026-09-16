@@ -1,4 +1,5 @@
 #include "orbits.h"
+#include "stroke.h"
 #include <QRandomGenerator>
 #include <QSGGeometryNode>
 #include <QSGVertexColorMaterial>
@@ -147,11 +148,7 @@ QSGNode *OrbitLayer::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
   const qreal cx = width() * 0.5, cy = height() * 0.5;
   const qreal unit = std::min(width(), height()) * 0.5 * m_scale;
 
-  struct Vertex {
-    float x, y;
-    uchar r, g, b, a;
-  };
-  QVector<Vertex> vertices;
+  QVector<stroke::Vertex> vertices;
   vertices.reserve(m_source->rings().size() * kSamples * 6);
 
   for (const Orbits::Ring &ring : m_source->rings()) {
@@ -167,51 +164,19 @@ QSGNode *OrbitLayer::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
       const QPointF point(cx + unitPoint.x() * unit,
                           cy - unitPoint.y() * unit);
 
-      if (havePrevious) {
-        // A segment belongs to this layer when its midpoint is on our side.
-        const qreal midDepth = (depth + previousDepth) * 0.5;
-        const bool mine = m_front ? midDepth >= 0.0 : midDepth < 0.0;
-        if (mine) {
-          QPointF d = point - previous;
-          const qreal length = std::hypot(d.x(), d.y());
-          if (length > 0.0001) {
-            d /= length;
-            const QPointF normal(-d.y(), d.x());
+      // A segment belongs to this layer when its midpoint is on our side.
+      const qreal midDepth = (depth + previousDepth) * 0.5;
+      const bool mine = m_front ? midDepth >= 0.0 : midDepth < 0.0;
+      if (havePrevious && mine) {
+        // Keep the stroke weight nearly constant and fade only the last
+        // stretch at each end, so each arc reads as a continuous ring.
+        const qreal taper = std::sin(M_PI * t);
+        const qreal ends = qBound(0.0, taper * 3.2, 1.0);
+        const qreal half = ring.thickness * unit * 0.5 * (0.8 + 0.2 * ends);
+        const qreal alpha = intensity * ends;
 
-            // Taper the stroke and fade the alpha towards the arc's ends so
-            // the arcs read as comet-like sweeps, not hard-cut segments.
-            // Keep the stroke weight nearly constant and fade only the last
-            // stretch at each end, so each arc reads as a continuous ring.
-            const qreal taper = std::sin(M_PI * t);
-            const qreal ends = qBound(0.0, taper * 3.2, 1.0);
-            const qreal half = ring.thickness * unit * 0.5 * (0.8 + 0.2 * ends);
-            const qreal alpha = intensity * ends;
-
-            const qreal rr = ring.color.redF() * alpha;
-            const qreal gg = ring.color.greenF() * alpha;
-            const qreal bb = ring.color.blueF() * alpha;
-            const auto toByte = [](qreal v) {
-              return uchar(qBound(0.0, v, 1.0) * 255.0 + 0.5);
-            };
-            const uchar cr = toByte(rr), cg = toByte(gg), cb = toByte(bb),
-                        ca = toByte(alpha);
-
-            const QPointF a0 = previous + normal * half;
-            const QPointF a1 = previous - normal * half;
-            const QPointF b0 = point + normal * half;
-            const QPointF b1 = point - normal * half;
-
-            const auto push = [&](const QPointF &p) {
-              vertices.append({float(p.x()), float(p.y()), cr, cg, cb, ca});
-            };
-            push(a0);
-            push(a1);
-            push(b0);
-            push(b0);
-            push(a1);
-            push(b1);
-          }
-        }
+        stroke::appendSegment(vertices, previous, point, half, half,
+                              ring.color, alpha, alpha);
       }
 
       previous = point;
@@ -224,7 +189,7 @@ QSGNode *OrbitLayer::updatePaintNode(QSGNode *old, UpdatePaintNodeData *) {
   if (!vertices.isEmpty()) {
     auto *target = geometry->vertexDataAsColoredPoint2D();
     for (int i = 0; i < vertices.size(); ++i) {
-      const Vertex &v = vertices[i];
+      const stroke::Vertex &v = vertices[i];
       target[i].set(v.x, v.y, v.r, v.g, v.b, v.a);
     }
   }

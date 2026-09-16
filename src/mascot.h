@@ -1,5 +1,7 @@
 #pragma once
 #include <QObject>
+#include <QVariantList>
+#include <QVector>
 #include <QPointF>
 #include <QRandomGenerator>
 
@@ -44,6 +46,10 @@ class Mascot : public QObject {
 
   Q_PROPERTY(qreal badge READ badge NOTIFY frame)
   Q_PROPERTY(qreal rings READ rings NOTIFY frame)
+  Q_PROPERTY(QVariantList droplets READ droplets NOTIFY frame)
+  Q_PROPERTY(qreal dashAngle READ dashAngle NOTIFY frame)
+  Q_PROPERTY(qreal dashLength READ dashLength NOTIFY frame)
+  Q_PROPERTY(qreal dashIntensity READ dashIntensity NOTIFY frame)
   Q_PROPERTY(qreal time READ time NOTIFY frame)
   Q_PROPERTY(int mood READ mood NOTIFY moodChanged)
   Q_PROPERTY(bool sleeping READ sleeping NOTIFY moodChanged)
@@ -63,7 +69,8 @@ public:
   };
   Q_ENUM(Form)
 
-  enum Mood { Resting, Happy, Thinking, Alert, Notifying, Asleep, Held };
+  enum Mood { Resting, Happy, Thinking, Alert, Notifying, Asleep, Held,
+              Dashing };
   Q_ENUM(Mood)
 
   explicit Mascot(QObject *parent = nullptr);
@@ -85,9 +92,13 @@ public:
   qreal eyeRightX() const { return m_right.position.x(); }
   qreal eyeRightY() const { return m_right.position.y(); }
   qreal eyeLeftScaleX() const { return m_left.scale.x(); }
-  qreal eyeLeftScaleY() const { return m_left.scale.y(); }
+  // The lid rides in the vertical scale, so a blink or a wink needs no extra
+  // uniform: an eye that is shut simply has no height.
+  qreal eyeLeftScaleY() const { return m_left.scale.y() * (1.0 - m_left.lid); }
   qreal eyeRightScaleX() const { return m_right.scale.x(); }
-  qreal eyeRightScaleY() const { return m_right.scale.y(); }
+  qreal eyeRightScaleY() const {
+    return m_right.scale.y() * (1.0 - m_right.lid);
+  }
   qreal eyeLeftAngle() const { return m_left.angle; }
   qreal eyeRightAngle() const { return m_right.angle; }
   qreal gazeYaw() const { return m_yaw; }
@@ -95,8 +106,21 @@ public:
   qreal eyeWidth() const { return m_eyeWidth; }
   qreal eyeHeight() const { return m_eyeHeight; }
   qreal eyeRound() const { return m_eyeRound; }
+
+  // Height of each eye as actually drawn, lid included.
+  qreal eyeLeftHeight() const { return m_eyeHeight * eyeLeftScaleY(); }
+  qreal eyeRightHeight() const { return m_eyeHeight * eyeRightScaleY(); }
+  bool winking() const { return m_winkHold >= 0.0; }
+  qreal dashAngle() const { return m_dashAngle; }
+  qreal dashLength() const { return m_dashLength; }
+  qreal dashIntensity() const { return m_dashIntensity; }
+  bool dashing() const { return m_mood == Dashing; }
   qreal badge() const { return m_badge; }
   qreal rings() const { return m_rings; }
+
+  // Flung-off droplets, as {x, y, radius, opacity} in body-radius units
+  // relative to her centre. Empty unless she is scattering.
+  QVariantList droplets() const;
   qreal time() const { return m_time; }
   int mood() const { return m_mood; }
   bool sleeping() const { return m_mood == Asleep; }
@@ -104,6 +128,14 @@ public:
 
   // Interaction.
   Q_INVOKABLE void poke();
+  Q_INVOKABLE void wink();
+  Q_INVOKABLE void scatter();
+
+  // Flight. `speed` is 0..1; the backend drives the window, this drives how
+  // she looks while it happens.
+  Q_INVOKABLE void beginDash(qreal angle, qreal speed);
+  Q_INVOKABLE void updateDash(qreal angle, qreal speed);
+  Q_INVOKABLE void endDash();
   Q_INVOKABLE void think(qreal seconds = 3.2);
   Q_INVOKABLE void alert();
   Q_INVOKABLE void notify();
@@ -146,6 +178,7 @@ private:
   void morphTo(int form, qreal seconds);
   void scheduleBlink();
   void advanceBlink(qreal dt);
+  qreal lidFor(qreal phase) const;
   void advanceIdle(qreal dt);
   void advanceMorph(qreal dt);
   void settle(qreal &value, qreal target, qreal dt, qreal rate) const;
@@ -175,6 +208,7 @@ private:
     QPointF position;
     QPointF scale{1.0, 1.0};
     qreal angle = 0.0; // slit rotation, radians
+    qreal lid = 0.0;   // 0 = open, 1 = squeezed shut
   };
   Eye m_left, m_right;
 
@@ -189,6 +223,23 @@ private:
 
   qreal m_blinkPhase = -1.0; // <0 means "not blinking"
   qreal m_nextBlink = 2.6;
+  // A wink shuts one eye and leaves it shut, so it is held rather than timed
+  // like a blink. Negative means "not winking".
+  qreal m_winkHold = -1.0;
+  qreal m_winkLid = 0.0;
+
+  // A droplet thrown clear when she breaks apart.
+  struct Droplet {
+    QPointF position;
+    QPointF velocity;
+    qreal radius = 0.0;
+    qreal life = 0.0;  // seconds remaining
+    qreal span = 1.0;  // seconds it started with
+  };
+  QVector<Droplet> m_droplets;
+
+  qreal m_dashAngle = 0.0, m_dashSpeed = 0.0;
+  qreal m_dashLength = 0.0, m_dashIntensity = 0.0;
 
   qreal m_badge = 0.0, m_badgeTarget = 0.0;
   qreal m_rings = 0.0, m_ringsTarget = 0.0;

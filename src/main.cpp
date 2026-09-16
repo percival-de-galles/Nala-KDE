@@ -3,6 +3,7 @@
 #include "mascot.h"
 #include "orbits.h"
 #include "selftest.h"
+#include "trail.h"
 #include "theme.h"
 
 #include <QApplication>
@@ -87,8 +88,9 @@ int main(int argc, char **argv) {
   parser.addOption({"poses", "Render one PNG per form into this directory "
                              "and exit (needs a display)", "path"});
   parser.addPositionalArgument(
-      "command", "run (default), settings, status, poke, think, alert, "
-                 "notify, rest, reset, quit");
+      "command",
+      "run (default), settings, status, poke, wink, think, alert, notify, "
+      "scatter, dash, rest, reset, quit");
   parser.process(app);
 
   // Both capture modes drive the animation clock themselves, so they share the
@@ -163,6 +165,7 @@ int main(int argc, char **argv) {
   Backend backend(configPath, preview, testing, &mascot, &theme, &cursor);
 
   qmlRegisterType<OrbitLayer>("Nala", 1, 0, "OrbitLayer");
+  qmlRegisterType<Trail>("Nala", 1, 0, "Trail");
   qmlRegisterUncreatableType<Mascot>("Nala", 1, 0, "Mascot",
                                      "Provided as a context property");
 
@@ -236,6 +239,8 @@ int main(int argc, char **argv) {
   QMenu menu;
   menu.addAction("Preferences…", &backend, &Backend::openSettings);
   menu.addAction("Say hello", &mascot, [&mascot] { mascot.poke(); });
+  menu.addAction("Off you go", &backend,
+                 [&backend] { backend.command("dash"); });
   menu.addAction("Reset position", &backend, &Backend::resetPlace);
   menu.addSeparator();
   menu.addAction("Quit Nala", &app, &QApplication::quit);

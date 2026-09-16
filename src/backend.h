@@ -5,6 +5,7 @@
 #include <QPoint>
 #include <QPointF>
 #include <QStringList>
+#include <QElapsedTimer>
 #include <QTimer>
 
 class QQuickWindow;
@@ -69,6 +70,12 @@ public:
   Q_INVOKABLE void releaseDrag();
   Q_INVOKABLE bool dragging() const { return m_dragging; }
 
+  // Drive flight. Called from the same frame callback as the mascot's tick so
+  // the two never drift apart.
+  Q_INVOKABLE void advance(qreal dt);
+  Q_INVOKABLE void launch(qreal dx, qreal dy, qreal speed);
+  bool flying() const { return m_flying; }
+
   // Test seams.
   void injectCursor(int x, int y);
   qreal windowSize() const;
@@ -115,4 +122,10 @@ private:
   // Drag bookkeeping.
   bool m_dragging = false;
   qreal m_dragSpeed = 0.0;
+  QPointF m_dragVelocity;   // pixels per second, smoothed
+  QElapsedTimer m_dragClock;
+
+  // Flight, in fractions of the screen's travel per second.
+  bool m_flying = false;
+  QPointF m_flightVelocity;
 };

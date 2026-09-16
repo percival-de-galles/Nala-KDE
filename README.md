@@ -28,9 +28,12 @@ already there:
 nala settings     # open preferences
 nala status       # what she is doing right now
 nala poke         # say hello
+nala wink         # one eye shut, held
 nala think        # spin up the orbit rings
 nala alert        # become an exclamation mark
 nala notify       # show the notification badge
+nala scatter      # come apart, then pull back together
+nala dash         # streak off across the desktop
 nala rest         # back to idle
 nala reset        # move her back to her default corner
 nala quit
@@ -43,6 +46,7 @@ nala quit
 | Drag | Picks her up; she stretches, then squashes where she lands |
 | Click | A happy squash-and-morph |
 | Double-click | She thinks, with orbit rings |
+| Throw | Let go mid-drag and she streaks off, bounces off the edges and lands |
 | Right-click | Preferences |
 | Hover | She widens her eyes and looks at you |
 | Leave her alone | She amuses herself, then falls asleep |
@@ -67,6 +71,7 @@ so she stays legible against the desktop.
 | `shaders/mascot.frag` | The body: one signed distance field per form, blended by distance so morphs are continuous rather than cross-faded. Runs on the GPU, so she stays crisp at any size. |
 | `src/mascot.*` | Her behaviour. Owns no rendering — it advances animation state on `tick()` and publishes properties, which makes the whole personality testable without a compositor or a GPU. |
 | `src/orbits.*` | The coloured arcs. Each is a circle in 3D, projected every frame and split into the half behind her and the half in front, drawn as scene-graph geometry either side of the body. |
+| `src/trail.*` | The comet trail she leaves when she dashes: a blade of bowed ribbons that straddles her. Shares its stroke geometry with the orbit arcs via `src/stroke.h`. |
 | `src/theme.*` | Watches Noctalia's generated GTK palette and shell settings and re-emits when the wallpaper changes. |
 | `src/cursor.*` | Global pointer position. Wayland denies this to clients, so it asks Hyprland over its IPC socket and reports itself unavailable elsewhere. |
 | `src/backend.*` | Preferences, placement, drag arithmetic and the control socket. |

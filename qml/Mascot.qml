@@ -27,6 +27,7 @@ Window {
         onTriggered: {
             const dt = Math.min(frameTime, 0.1);
             mascot.tick(dt);
+            backend.advance(dt);
             orbits.intensity = mascot.rings;
             orbits.advance(dt);
         }
@@ -97,6 +98,35 @@ Window {
             source: orbits
             front: true
             scale2: mascot.bodyScale
+        }
+
+        Trail {
+            anchors.fill: parent
+            angle: mascot.dashAngle
+            length: mascot.dashLength
+            intensity: mascot.dashIntensity
+            z: -1
+        }
+
+        // Droplets thrown clear when she comes apart. Positions arrive in
+        // units of her body radius, measured from her centre.
+        Repeater {
+            model: mascot.droplets
+
+            delegate: Rectangle {
+                required property var modelData
+
+                readonly property real unit: stage.width * 0.5 * 0.529
+
+                color: backend.mascotColor
+                opacity: modelData.opacity
+                width: Math.max(1, modelData.radius * 2 * unit)
+                height: width
+                radius: width / 2
+                antialiasing: true
+                x: stage.width / 2 + modelData.x * unit - width / 2
+                y: stage.height / 2 - modelData.y * unit - height / 2
+            }
         }
     }
 

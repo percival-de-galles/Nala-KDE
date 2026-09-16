@@ -162,6 +162,30 @@ Two of these are worth calling out because the obvious guess is wrong:
 The `--self-test` run prints its own measured blink cycle and morph duration
 against these figures, so a change in easing shows up immediately.
 
+## Winking, scattering and dashing
+
+Three behaviours that are not just another silhouette.
+
+**A wink is not a blink.** The reference squeezes the *right* eye to a clear
+horizontal dash while the left stays a full slit, holds it for two or three
+seconds, then blinks out of it. The dash matters: a blink shuts the eyes away
+completely, a wink leaves one visible and flattened, so the lid stops at 0.86
+rather than 1.0 and the squeezed eye spreads a little sideways. Lids are
+therefore per eye rather than a single shared height.
+
+**Scattering** collapses her to a speck while throwing off five or six
+droplets: one or two proper blobs among several specks, drifting outward,
+slowing against drag and fading over the back half of their lives.
+
+**The dash** is the one behaviour that moves her window rather than her
+silhouette. She tucks into a speck and streaks off, bouncing off the edges of
+the screen and arriving with a bounce. The trail is a slender blade of about
+six ribbons, all bowing the same way and bundled close -- not a fan opening to
+both sides -- tapering to points at each end. She sits about a third of the
+way along it, so it straddles her rather than trailing from her edge. It is
+about one body-diameter long, which is why it fits inside the window she
+already has instead of needing to be drawn across the desktop.
+
 ## The "..." run
 
 The three dots are not a separate shape. They are the circle with three

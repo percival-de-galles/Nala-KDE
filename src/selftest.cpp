@@ -55,7 +55,7 @@ int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
 
   const auto shoot = [&](const QString &name) {
     // Never catch her mid-blink: a captured pose should be comparable.
-    for (int i = 0; i < 60 && mascot.eyeHeight() < 0.2; ++i)
+    for (int i = 0; i < 60 && mascot.eyeLeftHeight() < 0.2; ++i)
       mascot.tick(1.0 / 60.0);
     orbits.setIntensity(mascot.rings()); // never inherit the previous pose
     window->requestUpdate();
@@ -121,6 +121,36 @@ int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
       mascot.tick(0.04);
     shoot(g.first);
   }
+
+  // Wink: one eye shut and held.
+  mascot.rest();
+  mascot.lookIdle();
+  mascot.wink();
+  for (int i = 0; i < 40; ++i)
+    mascot.tick(1.0 / 60.0);
+  shoot("wink");
+
+  // Scatter, caught while the droplets are still spreading.
+  mascot.rest();
+  mascot.setReducedMotion(false);
+  mascot.scatter();
+  for (int i = 0; i < 14; ++i)
+    mascot.tick(1.0 / 60.0);
+  shoot("scatter");
+  for (int i = 0; i < 12; ++i)
+    mascot.tick(1.0 / 60.0);
+  shoot("scatter-late");
+
+  // Dash, at full stretch.
+  mascot.rest();
+  mascot.beginDash(2.5, 1.0);
+  for (int i = 0; i < 25; ++i) {
+    mascot.updateDash(2.5, 1.0);
+    mascot.tick(1.0 / 60.0);
+  }
+  shoot("dash");
+  mascot.rest();
+  mascot.setReducedMotion(true);
 
   // Expression states on the idle body.
   mascot.rest();
@@ -234,6 +264,51 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   check(backend.nx() >= 0.0 && backend.ny() >= 0.0,
         "she cannot be dragged off the screen");
   backend.resetPlace();
+
+  // --- flight --------------------------------------------------------------
+  //
+  // Thrown hard enough she does not just drop: she tucks into a speck and
+  // streaks off, bounces off the edges, and arrives with a bounce.
+  {
+    backend.resetPlace();
+    const qreal startX = backend.nx();
+    backend.launch(-4000.0, 0.0, 4000.0);
+    check(backend.flying(), "a hard throw launches her");
+    check(mascot.dashing(), "she tucks in to fly");
+
+    for (int i = 0; i < 20; ++i) {
+      backend.advance(1.0 / 60.0);
+      mascot.tick(1.0 / 60.0);
+    }
+    check(backend.nx() < startX - 0.05, "she travels the way she was thrown");
+    check(mascot.dashLength() > 0.2, "she trails behind her while flying");
+    check(mascot.formB() == Mascot::Tiny, "she is a speck while flying");
+
+    // She must come to rest on screen, not sail off the edge.
+    for (int i = 0; i < 1200 && backend.flying(); ++i) {
+      backend.advance(1.0 / 60.0);
+      mascot.tick(1.0 / 60.0);
+    }
+    check(!backend.flying(), "she comes to rest");
+    check(!mascot.dashing(), "she unfolds when she lands");
+    check(backend.nx() >= 0.0 && backend.nx() <= 1.0 && backend.ny() >= 0.0 &&
+              backend.ny() <= 1.0,
+          "she stays on the screen");
+
+    for (int i = 0; i < 90; ++i)
+      mascot.tick(1.0 / 60.0);
+    check(mascot.dashLength() < 0.05, "the trail fades once she lands");
+    check(mascot.formB() == Mascot::Circle, "she is herself again");
+    backend.resetPlace();
+  }
+
+  // A gentle release is not a throw.
+  {
+    backend.grabDrag();
+    backend.dragBy(3.0, 0.0);
+    backend.releaseDrag();
+    check(!backend.flying(), "a gentle release just puts her down");
+  }
 
   // --- gaze ----------------------------------------------------------------
   mascot.setReducedMotion(true);
@@ -374,7 +449,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   {
     mascot.rest();
     mascot.lookIdle();
-    const qreal open = mascot.eyeHeight();
+    const qreal open = mascot.eyeLeftHeight();
     const qreal step = 1.0 / 60.0;
 
     int closing = 0, opening = 0, shut = 0;
@@ -382,7 +457,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
     qreal minimum = open;
     for (int i = 0; i < 1200 && !past; ++i) { // up to 20 s
       mascot.tick(step);
-      const qreal h = mascot.eyeHeight();
+      const qreal h = mascot.eyeLeftHeight();
       minimum = std::min(minimum, h);
       if (h < open * 0.92) {
         seen = true;
@@ -408,6 +483,64 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
           "a blink takes about as long as the reference's");
     check(closing > opening,
           "her lids close more slowly than they open, as the reference's do");
+  }
+
+  // --- wink ----------------------------------------------------------------
+  //
+  // The reference holds one eye shut for two or three seconds while the other
+  // stays a full slit, then blinks out of it.
+  {
+    mascot.rest();
+    mascot.lookIdle();
+    const qreal open = mascot.eyeLeftHeight();
+    mascot.wink();
+    for (int i = 0; i < 30; ++i)
+      mascot.tick(1.0 / 60.0);
+
+    check(mascot.winking(), "she can wink");
+    check(mascot.eyeRightHeight() < open * 0.25,
+          "a wink shuts one eye");
+    check(mascot.eyeLeftHeight() > open * 0.75,
+          "a wink leaves the other eye open");
+
+    // Held, not a blink: still shut a second later.
+    for (int i = 0; i < 60; ++i)
+      mascot.tick(1.0 / 60.0);
+    check(mascot.eyeRightHeight() < open * 0.25, "a wink is held");
+
+    for (int i = 0; i < 400; ++i)
+      mascot.tick(1.0 / 60.0);
+    check(!mascot.winking() && mascot.eyeRightHeight() > open * 0.75,
+          "she comes out of a wink");
+  }
+
+  // --- scatter -------------------------------------------------------------
+  {
+    mascot.rest();
+    check(mascot.droplets().isEmpty(), "no droplets at rest");
+    mascot.scatter();
+    mascot.tick(1.0 / 60.0);
+    const QVariantList thrown = mascot.droplets();
+    check(thrown.size() >= 5, "breaking apart throws off droplets");
+
+    const auto spread = [&] {
+      qreal furthest = 0.0;
+      for (const QVariant &v : mascot.droplets()) {
+        const QVariantMap d = v.toMap();
+        furthest = std::max(furthest, std::hypot(d["x"].toDouble(),
+                                                 d["y"].toDouble()));
+      }
+      return furthest;
+    };
+    const qreal near = spread();
+    for (int i = 0; i < 12; ++i)
+      mascot.tick(1.0 / 60.0);
+    check(spread() > near, "droplets drift outward");
+    check(mascot.formB() == Mascot::Tiny, "she collapses as she scatters");
+
+    for (int i = 0; i < 240; ++i)
+      mascot.tick(1.0 / 60.0);
+    check(mascot.droplets().isEmpty(), "droplets fade away");
   }
 
   // --- reactions -----------------------------------------------------------

@@ -16,6 +16,7 @@ qt_add_executable(nala
   src/mascot.cpp src/mascot.h
   src/orbits.cpp src/orbits.h
   src/selftest.cpp src/selftest.h
+  src/trail.cpp src/trail.h
   src/theme.cpp src/theme.h)
 
 qt_add_shaders(nala "shaders"
