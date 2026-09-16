@@ -11,6 +11,7 @@
 #include <QJsonDocument>
 #include <QQuickWindow>
 #include <QRandomGenerator>
+#include <iterator>
 #include <QRegion>
 #include <QSaveFile>
 #include <QScreen>
@@ -499,16 +500,17 @@ void Backend::command(const QString &name) {
 }
 
 QString Backend::status() const {
-  static const char *moods[] = {"resting", "happy",  "thinking", "alert",
-                                "notifying", "asleep", "held"};
+  static const char *moods[] = {"resting",   "happy",  "thinking", "alert",
+                                "notifying", "asleep", "held",     "dashing"};
   const int mood = m_mascot ? m_mascot->mood() : 0;
+  const int moodCount = int(std::size(moods));
   return QStringLiteral("Nala is running — size %1%, %2, at %3%/%4%, %5, %6 "
                         "(form %7→%8 %9%)")
       .arg(int(std::lround(m_size * 100)))
       .arg(m_colorMode == "theme" ? "following the desktop theme" : "ink")
       .arg(int(std::lround(m_place.x() * 100)))
       .arg(int(std::lround(m_place.y() * 100)))
-      .arg(mood >= 0 && mood < 7 ? moods[mood] : "?")
+      .arg(mood >= 0 && mood < moodCount ? moods[mood] : "?")
       .arg(!m_followCursor        ? "gaze free"
            : m_cursor && m_cursor->available()
                ? "tracking the cursor"
