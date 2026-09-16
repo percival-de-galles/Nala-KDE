@@ -86,6 +86,8 @@ and an input region shaped to her body.
 scripts/test.sh     # behaviour, headless
 scripts/poses.sh    # render one PNG per form, for comparing against the reference
 ctest --test-dir build
+
+build/nala --film build/film   # record a sequence at 60 fps, one PNG per frame
 ```
 
 `scripts/test.sh` runs offscreen, where there is no GPU surface and the body

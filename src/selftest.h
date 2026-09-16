@@ -15,6 +15,12 @@ class Theme;
 int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
                  QQuickWindow *window, const QString &directory);
 
+// Record a scripted sequence at exactly 60 fps, one PNG per frame, so her
+// motion can be compared against the reference's frame by frame rather than
+// pose by pose. Needs a real display.
+int captureFilm(QApplication &app, Mascot &mascot, Orbits &orbits,
+                QQuickWindow *window, const QString &directory);
+
 int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
                 Orbits &orbits, Theme &theme, QQuickWindow *window,
                 const QStringList &warnings, const QString &captureDir);

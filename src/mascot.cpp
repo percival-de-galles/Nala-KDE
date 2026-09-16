@@ -393,7 +393,7 @@ void Mascot::endDash() {
   setMood(Resting);
   m_dashSpeed = 0.0;
   m_idle = 0.0;
-  morphTo(Circle, 0.26);
+  morphTo(Circle, kSettleBack);
   // Arrive with a bounce, the way she does at the end of the reference's dash.
   m_scale = 0.72;
   m_scaleVelocity = 0.0;
@@ -434,7 +434,7 @@ void Mascot::tick(qreal dt) {
       m_hold = 0.0;
       if (m_mood != Held && m_mood != Asleep) {
         setMood(Resting);
-        morphTo(Circle, 0.24);
+        morphTo(Circle, kSettleBack);
         m_ringsTarget = 0.0;
         m_badgeTarget = 0.0;
         m_squashXTarget = m_squashYTarget = 1.0;
@@ -555,7 +555,7 @@ void Mascot::wake() {
   m_idle = 0.0;
   if (m_mood == Asleep) {
     setMood(Resting);
-    morphTo(Circle, 0.26);
+    morphTo(Circle, kSettleBack);
     m_scale = 0.75;
     m_scaleVelocity = 0.0;
     m_scaleTarget = 1.0;

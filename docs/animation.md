@@ -245,6 +245,35 @@ way along it, so it straddles her rather than trailing from her edge. It is
 about one body-diameter long, which is why it fits inside the window she
 already has instead of needing to be drawn across the desktop.
 
+## Watching it in motion
+
+Stills only go so far. `nala --film <dir>` records a scripted sequence at
+exactly 60 fps, one PNG per frame, so her motion can be laid against the
+reference's frame by frame. Two things showed up that no single frame could.
+
+**Leaving rest and returning to it are not mirror images.** Measured on the
+normalised silhouette width across the opening sequence:
+
+| | Reference | Nala before | Nala now |
+| --- | --- | --- | --- |
+| Collapse into "..." | 67 ms | 83 ms | 83 ms |
+| Return to the circle | **233 ms** | 100 ms | 233 ms |
+
+The curve *shape* was already right; it was simply compressed. Reacting is
+snappy and relaxing is gentle, so settling back to rest has its own duration
+(`Mascot::kSettleBack`) rather than reusing the reaction one.
+
+**The emphasised dot swells, it does not only darken.** As a fraction of the
+run's own span the reference's dots go from 0.158-0.166 when quiet to 0.212
+when loud, and their darkness from about 0.5 to 0.85. Nala now runs 0.161 to
+0.209 and 0.54 to 0.9. The quiet dots had been far too faint at a third
+darkness, which made the whole run read as grey rather than as one dot leading.
+
+A note on measuring this: normalise by something intrinsic to her, like the
+span between the outer dots. Normalising by the image width silently rescales
+everything when the window manager gives the preview a different size, which
+looked at first like the dots had halved.
+
 ## The "..." run
 
 The three dots are not a separate shape. They are the circle with three

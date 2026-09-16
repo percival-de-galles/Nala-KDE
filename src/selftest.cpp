@@ -187,6 +187,44 @@ int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
   return 0;
 }
 
+int captureFilm(QApplication &app, Mascot &mascot, Orbits &orbits,
+                QQuickWindow *window, const QString &directory) {
+  QDir().mkpath(directory);
+  QTest::qWait(500);
+
+  const qreal step = 1.0 / 60.0;
+  int frame = 0;
+  const auto run = [&](qreal seconds) {
+    const int frames = int(std::lround(seconds / step));
+    for (int i = 0; i < frames; ++i) {
+      mascot.tick(step);
+      orbits.setIntensity(mascot.rings());
+      orbits.advance(step);
+      window->requestUpdate();
+      QTest::qWait(18);
+      window->grabWindow().save(
+          QStringLiteral("%1/f%2.png").arg(directory).arg(frame++, 5, 10,
+                                                          QChar('0')));
+    }
+  };
+
+  // The reference's opening: she settles, collapses into the "..." run, holds
+  // it, then comes back. 2.4 s, which is 144 frames.
+  mascot.rest();
+  mascot.lookIdle();
+  mascot.setIdleAntics(false);
+  mascot.setReducedMotion(false);
+  run(0.5);
+  mascot.changeForm(Mascot::Dots);
+  run(1.0);
+  mascot.changeForm(Mascot::Circle, Mascot::kSettleBack);
+  run(0.9);
+
+  QTextStream(stdout) << "captured " << frame << " frames\n";
+  app.exit(0);
+  return 0;
+}
+
 int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
                 Orbits &orbits, Theme &theme, QQuickWindow *window,
                 const QStringList &warnings, const QString &captureDir) {

@@ -77,6 +77,11 @@ public:
   // height/width ratio swells by about 1.2% at 0.31 Hz, and the whole shape
   // drifts vertically at that same frequency -- the two are coupled, which is
   // what makes it read as breathing rather than as jitter.
+  // Settling back to rest is not the mirror of leaving it. Frame by frame the
+  // reference collapses into the "..." run in 67 ms but takes 233 ms to come
+  // back out of it -- reacting is snappy, relaxing is gentle.
+  static constexpr qreal kSettleBack = 0.53;
+
   static constexpr qreal kBreatheRate = 1.95;  // rad/s == 0.31 Hz
   static constexpr qreal kBreatheDepth = 0.007;
   static constexpr qreal kBreatheRise = 0.027; // vertical, in half-item units

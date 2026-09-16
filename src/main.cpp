@@ -87,6 +87,8 @@ int main(int argc, char **argv) {
   parser.addOption({"capture-dir", "Write test captures here", "path"});
   parser.addOption({"poses", "Render one PNG per form into this directory "
                              "and exit (needs a display)", "path"});
+  parser.addOption({"film", "Record a scripted sequence at 60 fps into this "
+                            "directory and exit (needs a display)", "path"});
   parser.addPositionalArgument(
       "command",
       "run (default), settings, status, poke, wink, think, alert, notify, "
@@ -96,7 +98,8 @@ int main(int argc, char **argv) {
   // Both capture modes drive the animation clock themselves, so they share the
   // same "the app is being measured, not used" flag: no cursor polling, no
   // stray input, no writing over the user's preferences.
-  const bool testing = parser.isSet("self-test") || parser.isSet("poses");
+  const bool testing = parser.isSet("self-test") || parser.isSet("poses") ||
+                       parser.isSet("film");
   const bool preview = parser.isSet("preview") || testing;
   const QString requested = parser.positionalArguments().value(0, "run");
   const QString socketPath = runtimeSocket();
@@ -264,6 +267,13 @@ int main(int argc, char **argv) {
 
   if (requested == "settings")
     QTimer::singleShot(200, &backend, &Backend::openSettings);
+
+  if (!parser.value("film").isEmpty()) {
+    QTimer::singleShot(0, &app, [&] {
+      captureFilm(app, mascot, orbits, window, parser.value("film"));
+    });
+    return app.exec();
+  }
 
   if (!parser.value("poses").isEmpty()) {
     QTimer::singleShot(0, &app, [&] {

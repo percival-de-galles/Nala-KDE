@@ -52,7 +52,7 @@ layout(std140, binding = 0) uniform buf {
 const float kRadius = 0.529; // idle body radius
 const float kDotGap = 0.285; // "..." dot spacing
 const float kDotSide = 0.092;
-const float kDotCore = 0.105;
+const float kDotCore = 0.092; // all three are the same size when quiet
 
 float sdCircle(vec2 p, float r) { return length(p) - r; }
 
@@ -105,23 +105,34 @@ float smoothUnion(float a, float b, float k) {
 
 // The "..." run. At spread 0 with a full core this is exactly the idle circle,
 // which is what makes the collapse into three dots one continuous motion.
-float dotCore() { return mix(kRadius, kDotCore, dotsShrink); }
-float dotSide() { return kDotSide * dotsSpread; }
+// How emphasised dot `i` is right now, 0..1.
+float dotPulse(int i) {
+    float w = max(0.0, cos(dotsPhase - float(i) * 2.0943951));
+    return w * w;
+}
+
+// The emphasised dot swells as well as darkening: measured across the
+// reference's run it goes from 0.046 R when quiet to 0.058-0.061 R when loud.
+// Gated on the spread so the swell cannot distort the collapse itself.
+float dotScale(int i) {
+    return mix(1.0, 1.0 + 0.30 * dotPulse(i),
+               smoothstep(0.55, 1.0, dotsSpread));
+}
+
+// Opacity. The quiet dots sit around half darkness in the reference (0.49 to
+// 0.58) rather than a third, against the loud one's 0.64 to 0.88.
+float dotWave(int i) { return 0.55 + 0.40 * dotPulse(i); }
+
+float dotCore() { return mix(kRadius, kDotCore, dotsShrink) * dotScale(1); }
+float dotSide(int i) { return kDotSide * dotsSpread * dotScale(i); }
 float dotGap() { return kDotGap * dotsSpread; }
 
 float sdDots(vec2 p, float spread, float shrink) {
-    float core = mix(kRadius, kDotCore, shrink);
-    float side = kDotSide * spread;
     float gap = kDotGap * spread;
-    float d = sdCircle(p, core);
-    d = min(d, sdCircle(p - vec2(gap, 0.0), side));
-    d = min(d, sdCircle(p + vec2(gap, 0.0), side));
+    float d = sdCircle(p, mix(kRadius, kDotCore, shrink) * dotScale(1));
+    d = min(d, sdCircle(p - vec2(gap, 0.0), kDotSide * spread * dotScale(2)));
+    d = min(d, sdCircle(p + vec2(gap, 0.0), kDotSide * spread * dotScale(0)));
     return d;
-}
-
-float dotWave(int i) {
-    float w = max(0.0, cos(dotsPhase - float(i) * 2.0943951));
-    return 0.34 + 0.66 * w * w;
 }
 
 // In the reference the three dots pulse in turn, so the run reads as a
@@ -132,7 +143,7 @@ float dotWave(int i) {
 // her body the two side dots sit inside it, and going by centres would hand
 // half the body to them and grey it out on the way in.
 float dotsEmphasis(vec2 p) {
-    float core = dotCore(), side = dotSide(), gap = dotGap();
+    float core = dotCore(), gap = dotGap();
 
     // The core only joins the pulse once it is genuinely a dot; until then it
     // is still her body, and her body is solid.
@@ -141,10 +152,10 @@ float dotsEmphasis(vec2 p) {
     float best = sdCircle(p, core);
     float emphasis = mix(1.0, dotWave(1), formed);
 
-    float dLeft = sdCircle(p + vec2(gap, 0.0), side);
+    float dLeft = sdCircle(p + vec2(gap, 0.0), dotSide(0));
     if (dLeft < best) { best = dLeft; emphasis = dotWave(0); }
 
-    float dRight = sdCircle(p - vec2(gap, 0.0), side);
+    float dRight = sdCircle(p - vec2(gap, 0.0), dotSide(2));
     if (dRight < best) { best = dRight; emphasis = dotWave(2); }
 
     return emphasis;
@@ -257,9 +268,9 @@ void main() {
         // dot in its own right it joins the pulse. Testing against the side
         // dots' own fields -- rather than against the blended silhouette,
         // which reaches past them -- is what keeps the body from dimming.
-        float gap = dotGap(), side = dotSide();
-        float dSide = min(sdCircle(p + vec2(gap, 0.0), side),
-                          sdCircle(p - vec2(gap, 0.0), side));
+        float gap = dotGap();
+        float dSide = min(sdCircle(p + vec2(gap, 0.0), dotSide(0)),
+                          sdCircle(p - vec2(gap, 0.0), dotSide(2)));
         float inSide = 1.0 - step(0.0, dSide);
         float formed = smoothstep(0.80, 1.0, dotsShrink);
         float apply = dotsWeight * max(formed, inSide);
