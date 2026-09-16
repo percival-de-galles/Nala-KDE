@@ -1,0 +1,456 @@
+#include "backend.h"
+#include "cursor.h"
+#include "mascot.h"
+#include "theme.h"
+
+#include <QCoreApplication>
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QGuiApplication>
+#include <QJsonDocument>
+#include <QQuickWindow>
+#include <QRegion>
+#include <QSaveFile>
+#include <QScreen>
+#include <QStandardPaths>
+
+#ifdef NALA_HAVE_LAYER_SHELL
+#include <LayerShellQt/Window>
+#endif
+
+namespace {
+
+constexpr qreal kMinSize = 0.55;
+constexpr qreal kMaxSize = 2.20;
+
+// The window is deliberately larger than the body so morphs that reach beyond
+// the idle silhouette -- the exclamation mark, the orbit rings -- are not
+// clipped. The reference reel uses the same headroom.
+constexpr qreal kCanvasToBody = 1.89; // 1 / 0.529, the measured body radius
+constexpr int kBaseBody = 116; // logical pixels at size 1.0
+
+QString autostartPath() {
+  return QStandardPaths::writableLocation(QStandardPaths::ConfigLocation) +
+         "/autostart/nala.desktop";
+}
+
+} // namespace
+
+Backend::Backend(QString configPath, bool preview, bool testing, Mascot *mascot,
+                 Theme *theme, Cursor *cursor, QObject *parent)
+    : QObject(parent), m_configPath(std::move(configPath)), m_preview(preview),
+      m_testing(testing), m_mascot(mascot), m_theme(theme), m_cursor(cursor) {
+  m_saveTimer.setSingleShot(true);
+  m_saveTimer.setInterval(400); // coalesce slider drags into one write
+  connect(&m_saveTimer, &QTimer::timeout, this, &Backend::save);
+
+  load();
+  applyToMascot();
+
+  if (m_theme)
+    connect(m_theme, &Theme::changed, this, [this] { emit changed(); });
+
+  if (m_cursor && m_mascot) {
+    connect(m_cursor, &Cursor::moved, this, [this](QPoint position) {
+      if (!m_followCursor)
+        return;
+      const qreal radius = bodyRadius();
+      if (radius <= 0.0)
+        return;
+      const QPointF centre = centreOnScreen();
+      m_mascot->lookAt((position.x() - centre.x()) / radius,
+                       (position.y() - centre.y()) / radius);
+    });
+  }
+
+  if (!m_testing) {
+    connect(qApp, &QGuiApplication::screenAdded, this,
+            &Backend::screensChanged);
+    connect(qApp, &QGuiApplication::screenRemoved, this,
+            &Backend::screensChanged);
+  }
+}
+
+// --- preferences -----------------------------------------------------------
+
+void Backend::load() {
+  QFile file(m_configPath);
+  if (!file.open(QIODevice::ReadOnly))
+    return;
+  const QJsonObject json =
+      QJsonDocument::fromJson(file.readAll()).object();
+
+  m_size = qBound(kMinSize, json.value("size").toDouble(m_size), kMaxSize);
+  const QString mode = json.value("colorMode").toString(m_colorMode);
+  if (mode == "ink" || mode == "theme")
+    m_colorMode = mode;
+  m_followCursor = json.value("followCursor").toBool(m_followCursor);
+  m_idleAntics = json.value("idleAntics").toBool(m_idleAntics);
+  m_sleepWhenIdle = json.value("sleepWhenIdle").toBool(m_sleepWhenIdle);
+  m_reducedMotion = json.value("reducedMotion").toBool(m_reducedMotion);
+  m_stayOnTop = json.value("stayOnTop").toBool(m_stayOnTop);
+  m_monitor = json.value("monitor").toString(m_monitor);
+  m_place = QPointF(
+      qBound(0.0, json.value("x").toDouble(m_place.x()), 1.0),
+      qBound(0.0, json.value("y").toDouble(m_place.y()), 1.0));
+}
+
+void Backend::save() {
+  if (m_testing)
+    return; // a measured run must never overwrite real preferences
+
+  QDir().mkpath(QFileInfo(m_configPath).absolutePath());
+  const QJsonObject json{
+      {"size", m_size},
+      {"colorMode", m_colorMode},
+      {"followCursor", m_followCursor},
+      {"idleAntics", m_idleAntics},
+      {"sleepWhenIdle", m_sleepWhenIdle},
+      {"reducedMotion", m_reducedMotion},
+      {"stayOnTop", m_stayOnTop},
+      {"monitor", m_monitor},
+      {"x", m_place.x()},
+      {"y", m_place.y()},
+  };
+
+  QSaveFile file(m_configPath);
+  if (!file.open(QIODevice::WriteOnly)) {
+    note(QStringLiteral("Could not save preferences."));
+    return;
+  }
+  file.write(QJsonDocument(json).toJson(QJsonDocument::Indented));
+  if (!file.commit())
+    note(QStringLiteral("Could not save preferences."));
+}
+
+void Backend::note(const QString &message) {
+  m_feedback = message;
+  emit feedbackChanged();
+}
+
+void Backend::applyToMascot() {
+  if (!m_mascot)
+    return;
+  m_mascot->setReducedMotion(m_reducedMotion);
+  m_mascot->setSleepWhenIdle(m_sleepWhenIdle);
+  m_mascot->setIdleAntics(m_idleAntics);
+  if (m_cursor)
+    m_cursor->setActive(m_followCursor && !m_testing);
+  if (!m_followCursor)
+    m_mascot->lookIdle();
+}
+
+void Backend::configure(const QString &key, const QVariant &value) {
+  if (key == "size") {
+    const qreal wanted = value.toDouble();
+    if (wanted < kMinSize || wanted > kMaxSize)
+      return; // out of range: keep the current value rather than clamping
+    m_size = wanted;
+  } else if (key == "colorMode") {
+    const QString mode = value.toString();
+    if (mode != "ink" && mode != "theme")
+      return;
+    m_colorMode = mode;
+  } else if (key == "followCursor") {
+    m_followCursor = value.toBool();
+  } else if (key == "idleAntics") {
+    m_idleAntics = value.toBool();
+  } else if (key == "sleepWhenIdle") {
+    m_sleepWhenIdle = value.toBool();
+  } else if (key == "reducedMotion") {
+    m_reducedMotion = value.toBool();
+  } else if (key == "stayOnTop") {
+    m_stayOnTop = value.toBool();
+  } else if (key == "monitor") {
+    m_monitor = value.toString();
+  } else {
+    return;
+  }
+
+  applyToMascot();
+  applyPlacement();
+  emit changed();
+  m_saveTimer.start();
+}
+
+QColor Backend::mascotColor() const {
+  if (m_colorMode == "theme" && m_theme)
+    return m_theme->mascotColor();
+  return QColor("#0a090c"); // the reference silhouette
+}
+
+// --- placement -------------------------------------------------------------
+
+QStringList Backend::screens() const {
+  QStringList names;
+  for (const QScreen *screen : QGuiApplication::screens())
+    names << screen->name();
+  return names;
+}
+
+QRect Backend::screenGeometry() const {
+  const QList<QScreen *> all = QGuiApplication::screens();
+  for (QScreen *screen : all)
+    if (!m_monitor.isEmpty() && screen->name() == m_monitor)
+      return screen->geometry();
+  QScreen *primary = QGuiApplication::primaryScreen();
+  if (primary)
+    return primary->geometry();
+  return all.isEmpty() ? QRect(0, 0, 1920, 1080) : all.first()->geometry();
+}
+
+qreal Backend::windowSize() const {
+  return kBaseBody * kCanvasToBody * m_size;
+}
+
+qreal Backend::bodyRadius() const {
+  return windowSize() / kCanvasToBody * 0.5;
+}
+
+// Where Nala actually is, in compositor coordinates.
+//
+// Deliberately derived from the placement we asked for rather than from
+// m_window->x()/y(): a layer-shell surface is positioned by the shell, and the
+// QWindow's own coordinates do not describe where it ended up. Reading them
+// here is what made the gaze aim at the wrong point.
+QPointF Backend::centreOnScreen() const {
+  // An ordinary window is placed by the compositor, so ask it where it ended
+  // up. A layer-shell surface is not: its QWindow coordinates say nothing
+  // about where the shell actually put it, so use the placement we asked for.
+  if (m_window && !m_layered)
+    return QPointF(m_window->x() + m_window->width() * 0.5,
+                   m_window->y() + m_window->height() * 0.5);
+
+  const QRect screen = screenGeometry();
+  const qreal extent = windowSize();
+  return QPointF(
+      screen.x() + m_place.x() * (screen.width() - extent) + extent * 0.5,
+      screen.y() + m_place.y() * (screen.height() - extent) + extent * 0.5);
+}
+
+void Backend::attach(QQuickWindow *window) {
+  m_window = window;
+  if (!m_window)
+    return;
+
+  m_window->setFlag(Qt::FramelessWindowHint, true);
+  m_window->setColor(Qt::transparent);
+
+#ifdef NALA_HAVE_LAYER_SHELL
+  // Must happen while the window is still hidden: LayerShellQt can only give a
+  // QWindow the layer-surface role before its platform surface exists. This is
+  // what makes Nala a free-floating companion instead of a tiled window.
+  if (!m_preview) {
+    if (auto *layer = LayerShellQt::Window::get(m_window)) {
+      layer->setScope(QStringLiteral("nala"));
+      layer->setAnchors({LayerShellQt::Window::AnchorTop |
+                         LayerShellQt::Window::AnchorLeft});
+      layer->setExclusiveZone(-1); // never reserve space from other windows
+      layer->setKeyboardInteractivity(
+          LayerShellQt::Window::KeyboardInteractivityNone);
+      layer->setCloseOnDismissed(false);
+      m_layered = true;
+    }
+  }
+#endif
+
+  applyPlacement();
+  m_window->setVisible(true);
+  applyInputRegion(false);
+}
+
+void Backend::applyPlacement() {
+  if (!m_window)
+    return;
+
+  const int extent = int(std::lround(windowSize()));
+  const QRect screen = screenGeometry();
+  const int x = int(std::lround(m_place.x() * (screen.width() - extent)));
+  const int y = int(std::lround(m_place.y() * (screen.height() - extent)));
+
+#ifdef NALA_HAVE_LAYER_SHELL
+  if (m_layered) {
+    if (auto *layer = LayerShellQt::Window::get(m_window)) {
+      QScreen *target = nullptr;
+      for (QScreen *candidate : QGuiApplication::screens())
+        if (!m_monitor.isEmpty() && candidate->name() == m_monitor)
+          target = candidate;
+      if (target)
+        layer->setScreen(target);
+
+      layer->setLayer(m_stayOnTop ? LayerShellQt::Window::LayerTop
+                                  : LayerShellQt::Window::LayerBottom);
+      // A layer surface is sized and placed by the shell, not by x/y.
+      layer->setDesiredSize(QSize(extent, extent));
+      layer->setMargins(QMargins(x, y, 0, 0));
+      if (m_window->width() != extent || m_window->height() != extent)
+        m_window->resize(extent, extent);
+      applyInputRegion(m_dragging);
+      return;
+    }
+  }
+#endif
+
+  if (m_window->width() != extent || m_window->height() != extent)
+    m_window->resize(extent, extent);
+  m_window->setPosition(screen.x() + x, screen.y() + y);
+  applyInputRegion(m_dragging);
+}
+
+void Backend::applyInputRegion(bool wholeWindow) {
+  if (!m_window)
+    return;
+  const int extent = m_window->width();
+  if (extent <= 0)
+    return;
+
+  if (wholeWindow) {
+    // While she is being dragged the pointer wanders outside her silhouette;
+    // widen the input region so the motion and the release still arrive.
+    m_window->setMask(QRegion(0, 0, extent, extent));
+    return;
+  }
+
+  // Otherwise only the mascot herself swallows clicks, so the transparent
+  // margin around her stays click-through and never blocks the desktop.
+  const int body = int(std::lround(extent / kCanvasToBody));
+  const int inset = (extent - body) / 2;
+  m_window->setMask(QRegion(inset, inset, body, body, QRegion::Ellipse));
+}
+
+void Backend::resetPlace() {
+  m_place = QPointF(0.86, 0.74);
+  applyPlacement();
+  emit changed();
+  m_saveTimer.start();
+}
+
+// --- drag ------------------------------------------------------------------
+
+void Backend::grabDrag() {
+  if (!m_window || m_dragging)
+    return;
+  m_dragging = true;
+  m_dragSpeed = 0.0;
+  applyInputRegion(true);
+  if (m_mascot)
+    m_mascot->beginDrag();
+}
+
+void Backend::dragBy(qreal dx, qreal dy) {
+  if (!m_dragging || !m_window)
+    return;
+
+  const QRect screen = screenGeometry();
+  const int extent = m_window->width();
+  const qreal spanX = std::max(1, screen.width() - extent);
+  const qreal spanY = std::max(1, screen.height() - extent);
+
+  m_place = QPointF(qBound(0.0, m_place.x() + dx / spanX, 1.0),
+                    qBound(0.0, m_place.y() + dy / spanY, 1.0));
+
+  // Exponential average: a single jittery event should not read as a throw.
+  m_dragSpeed = m_dragSpeed * 0.6 + std::hypot(dx, dy) * 0.4;
+
+  applyPlacement();
+  emit changed();
+}
+
+void Backend::releaseDrag() {
+  if (!m_dragging)
+    return;
+  m_dragging = false;
+  applyInputRegion(false);
+  if (m_mascot)
+    m_mascot->endDrag(qBound(0.0, m_dragSpeed / 26.0, 1.0));
+  m_saveTimer.start();
+}
+
+void Backend::injectCursor(int x, int y) {
+  if (m_cursor)
+    m_cursor->inject(QPoint(x, y));
+}
+
+// --- commands --------------------------------------------------------------
+
+void Backend::openSettings() { emit settingsRequested(); }
+
+void Backend::quit() { QCoreApplication::quit(); }
+
+void Backend::command(const QString &name) {
+  if (!m_mascot)
+    return;
+  if (name == "poke")
+    m_mascot->poke();
+  else if (name == "think")
+    m_mascot->think();
+  else if (name == "alert")
+    m_mascot->alert();
+  else if (name == "notify")
+    m_mascot->notify();
+  else if (name == "wake")
+    m_mascot->wake();
+  else if (name == "rest")
+    m_mascot->rest();
+  else if (name == "settings")
+    openSettings();
+  else if (name == "reset")
+    resetPlace();
+  else if (name == "quit")
+    quit();
+}
+
+QString Backend::status() const {
+  static const char *moods[] = {"resting", "happy",  "thinking", "alert",
+                                "notifying", "asleep", "held"};
+  const int mood = m_mascot ? m_mascot->mood() : 0;
+  return QStringLiteral("Nala is running — size %1%, %2, at %3%/%4%, %5, %6 "
+                        "(form %7→%8 %9%)")
+      .arg(int(std::lround(m_size * 100)))
+      .arg(m_colorMode == "theme" ? "following the desktop theme" : "ink")
+      .arg(int(std::lround(m_place.x() * 100)))
+      .arg(int(std::lround(m_place.y() * 100)))
+      .arg(mood >= 0 && mood < 7 ? moods[mood] : "?")
+      .arg(!m_followCursor        ? "gaze free"
+           : m_cursor && m_cursor->available()
+               ? "tracking the cursor"
+               : "cursor unavailable")
+      .arg(m_mascot ? m_mascot->formA() : -1)
+      .arg(m_mascot ? m_mascot->formB() : -1)
+      .arg(m_mascot ? int(std::lround(m_mascot->formMix() * 100)) : 0);
+}
+
+// --- autostart -------------------------------------------------------------
+
+bool Backend::startAtLogin() const { return QFile::exists(autostartPath()); }
+
+void Backend::setStartAtLogin(bool enabled) {
+  const QString path = autostartPath();
+  if (!enabled) {
+    if (QFile::exists(path) && !QFile::remove(path))
+      note(QStringLiteral("Could not remove the autostart entry."));
+    emit changed();
+    return;
+  }
+
+  QDir().mkpath(QFileInfo(path).absolutePath());
+  QSaveFile file(path);
+  if (!file.open(QIODevice::WriteOnly)) {
+    note(QStringLiteral("Could not create the autostart entry."));
+    emit changed();
+    return;
+  }
+  const QString entry = QStringLiteral("[Desktop Entry]\n"
+                                       "Type=Application\n"
+                                       "Name=Nala\n"
+                                       "Comment=Desktop companion\n"
+                                       "Exec=%1\n"
+                                       "Terminal=false\n"
+                                       "X-GNOME-Autostart-enabled=true\n")
+                            .arg(QCoreApplication::applicationFilePath());
+  file.write(entry.toUtf8());
+  if (!file.commit())
+    note(QStringLiteral("Could not create the autostart entry."));
+  emit changed();
+}

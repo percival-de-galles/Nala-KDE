@@ -1,0 +1,90 @@
+# Nala
+
+A desktop companion for Hyprland. Nala floats on the desktop, follows the
+cursor with her eyes, morphs between a small vocabulary of shapes, and can be
+picked up and dropped anywhere. She lives in the notification tray, and she
+takes her colours from Noctalia so she restyles herself when the wallpaper
+changes.
+
+## Requirements
+
+- Qt 6.10 or newer (`Core Gui Widgets Quick Qml ShaderTools Test`)
+- `layer-shell-qt` 6.7+ — optional, but without it Nala is an ordinary window
+  that the compositor will tile rather than a free-floating companion
+- A Wayland compositor supporting `wlr-layer-shell`; developed on Hyprland
+- Noctalia — optional; without it Nala falls back to her own dark palette
+
+## Build and run
+
+```bash
+scripts/build.sh
+scripts/run.sh
+```
+
+Nala is single-instance. Running the command again talks to the copy that is
+already there:
+
+```bash
+nala settings     # open preferences
+nala status       # what she is doing right now
+nala poke         # say hello
+nala think        # spin up the orbit rings
+nala alert        # become an exclamation mark
+nala notify       # show the notification badge
+nala rest         # back to idle
+nala reset        # move her back to her default corner
+nala quit
+```
+
+## Using her
+
+| Action | What happens |
+| --- | --- |
+| Drag | Picks her up; she stretches, then squashes where she lands |
+| Click | A happy squash-and-morph |
+| Double-click | She thinks, with orbit rings |
+| Right-click | Preferences |
+| Hover | She widens her eyes and looks at you |
+| Leave her alone | She amuses herself, then falls asleep |
+
+Clicks outside her silhouette pass straight through to whatever is underneath,
+so she never blocks the desktop.
+
+## Preferences
+
+Tray icon, right-click, or `nala settings`. Size, colour (ink or wallpaper),
+which display, cursor-following, idle antics, sleep, layer, reduced motion and
+start-at-login. Stored at `~/.config/nala/preferences.json`.
+
+**Colour** is `Ink` by default — the near-black of the reference. `Wallpaper`
+derives her colour from Noctalia's accent instead, lightening or deepening it
+so she stays legible against the desktop.
+
+## How it is put together
+
+| | |
+| --- | --- |
+| `shaders/mascot.frag` | The body: one signed distance field per form, blended by distance so morphs are continuous rather than cross-faded. Runs on the GPU, so she stays crisp at any size. |
+| `src/mascot.*` | Her behaviour. Owns no rendering — it advances animation state on `tick()` and publishes properties, which makes the whole personality testable without a compositor or a GPU. |
+| `src/orbits.*` | The coloured arcs. Each is a circle in 3D, projected every frame and split into the half behind her and the half in front, drawn as scene-graph geometry either side of the body. |
+| `src/theme.*` | Watches Noctalia's generated GTK palette and shell settings and re-emits when the wallpaper changes. |
+| `src/cursor.*` | Global pointer position. Wayland denies this to clients, so it asks Hyprland over its IPC socket and reports itself unavailable elsewhere. |
+| `src/backend.*` | Preferences, placement, drag arithmetic and the control socket. |
+
+Nala is placed as a `wlr-layer-shell` surface. That is what makes her a
+companion rather than a window: no decorations, no tiling, no taskbar entry,
+and an input region shaped to her body.
+
+## Tests
+
+```bash
+scripts/test.sh     # behaviour, headless
+scripts/poses.sh    # render one PNG per form, for comparing against the reference
+ctest --test-dir build
+```
+
+`scripts/test.sh` runs offscreen, where there is no GPU surface and the body
+shader never compiles; it detects that and skips the appearance assertions
+rather than failing them. Run `build/nala --self-test` with a display attached
+to exercise those too — they check her proportions against the measurements in
+[docs/animation.md](docs/animation.md).

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- Nala at rest: the idle silhouette with her two slit eyes. -->
+  <circle cx="32" cy="32" r="26" fill="#0a090c"/>
+  <g fill="#fdfdfd">
+    <rect x="29.0" y="19.6" width="7.3" height="12.6" rx="3.65"/>
+    <rect x="40.8" y="19.6" width="7.3" height="12.6" rx="3.65"/>
+  </g>
+</svg>
