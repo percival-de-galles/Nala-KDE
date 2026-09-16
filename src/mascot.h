@@ -73,6 +73,14 @@ public:
               Dashing };
   Q_ENUM(Mood)
 
+  // She never holds perfectly still. Measured from the reference: the body's
+  // height/width ratio swells by about 1.2% at 0.31 Hz, and the whole shape
+  // drifts vertically at that same frequency -- the two are coupled, which is
+  // what makes it read as breathing rather than as jitter.
+  static constexpr qreal kBreatheRate = 1.95;  // rad/s == 0.31 Hz
+  static constexpr qreal kBreatheDepth = 0.007;
+  static constexpr qreal kBreatheRise = 0.027; // vertical, in half-item units
+
   explicit Mascot(QObject *parent = nullptr);
 
   int formA() const { return m_formA; }
@@ -81,8 +89,9 @@ public:
   qreal dotsSpread() const { return m_dotsSpread; }
   qreal dotsShrink() const { return m_dotsShrink; }
   qreal dotsPhase() const { return m_dotsPhase; }
-  qreal squashX() const { return m_squashX; }
-  qreal squashY() const { return m_squashY; }
+  // Reaction squash, with the idle swell riding on top of it.
+  qreal squashX() const { return m_squashX * (1.0 + kBreatheDepth * m_breathe); }
+  qreal squashY() const { return m_squashY * (1.0 - kBreatheDepth * m_breathe); }
   qreal bodyScale() const { return m_scale; }
   qreal roll() const { return m_roll; }
   qreal bobX() const { return m_bobX; }
@@ -248,7 +257,7 @@ private:
   qreal m_hold = 0.0;     // seconds left in the current mood
   qreal m_idle = 0.0;     // seconds since the last interaction
   qreal m_antic = 7.0;    // seconds until the next spontaneous flourish
-  qreal m_wobble = 0.0;   // decaying alert shake
+  qreal m_breathe = 0.0;  // -1..1, the slow idle swell
   qreal m_cooldown = 0.0; // rate-limit on reactions
 
   bool m_reduced = false;

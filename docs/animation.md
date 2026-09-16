@@ -72,13 +72,13 @@ reference frame, after normalising both to a common bounding box:
 | Form | IoU |
 | --- | --- |
 | Circle | 0.925 |
-| Egg | 0.902 |
+| Egg | 0.946 |
 | Hexagon | 0.953 |
 | Triangle | 0.951 |
-| Exclamation | 0.849 |
+| Exclamation | 0.870 |
 | Teardrop | 0.885 |
 | Sleeping dot | 0.986 |
-| **Mean** | **0.921** |
+| **Mean** | **0.931** |
 
 The residual is mostly edge antialiasing and the fact that the reference frames
 are single moments of a continuously breathing body — the reference circle
@@ -133,6 +133,34 @@ reference holds the height/width ratio at about 1.5 whichever way she looks
 Only the circle, egg, hexagon and triangle carry a face. The exclamation mark,
 the teardrop, the "..." run and the sleeping dot are featureless, so the eyes
 fade out across the morph rather than riding along on a shape that has none.
+
+## Secondary motion
+
+The things that keep her from looking like a cutout, all measured rather than
+invented.
+
+**She breathes.** During idle her height/width ratio swells by about 1.2% at
+**0.31 Hz**, and she drifts vertically at that same frequency with an amplitude
+of 0.0136 of her body. The shared frequency is the point: the two are coupled,
+so she sinks as she widens, and that reads as breathing rather than as jitter.
+Nala runs at 1.40% and 0.0135.
+
+**The exclamation mark does not wobble.** This is the easy one to get wrong --
+an impact wants a decaying shake. Frame by frame the reference simply swings
+into its lean and stops:
+
+| t (s) | 5.95 | 6.02 | 6.05 | 6.10 | 6.15 | 6.30 |
+| --- | --- | --- | --- | --- | --- | --- |
+| lean | −6.6° | −9.5° | −11.6° | −14.6° | −15.9° | −17.0° |
+
+It arrives 11° short of its settled −17.4° and eases in over about 350 ms,
+monotonically, with no overshoot. Across the whole held stretch afterwards the
+total swing is 3.5°, decaying to nothing.
+
+**Nothing overshoots in size.** Both of the reference's re-inflations rise to
+full over 583 ms and 650 ms with an overshoot of exactly 0.00%, so the scale
+spring is damped past critical. The elasticity lives in the squash, not in the
+size.
 
 ## Timing
 

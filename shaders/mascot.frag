@@ -150,13 +150,13 @@ float dotsEmphasis(vec2 p) {
     return emphasis;
 }
 
-// Leans right by about 16 degrees, with a stem of nearly constant width and a
-// dot a little narrower than the stem -- all measured off the reference.
+// The stem holds a constant width rather than tapering: sampled down the
+// reference it reads 0.250, 0.255, 0.255, 0.255, 0.255, 0.255, 0.252, 0.250.
+// Tapering it, which is the intuitive thing to do, costs about 0.02 of IoU.
 float sdExclaim(vec2 p) {
     p = rotate(p, 0.27);
-    float stem = sdSegment(p, vec2(0.0, 0.212), vec2(0.0, -0.045), 0.073);
-    stem += 0.012 * smoothstep(0.18, -0.045, p.y); // barely tapered
-    float point = sdCircle(p - vec2(0.0, -0.213), 0.057);
+    float stem = sdSegment(p, vec2(0.0, 0.217), vec2(0.0, -0.030), 0.068);
+    float point = sdCircle(p - vec2(0.0, -0.215), 0.062);
     return min(stem, point);
 }
 
@@ -173,7 +173,7 @@ float sdTeardrop(vec2 p) {
 float sdEgg(vec2 p) {
     p.y += 0.025;
     float taper = 1.0 - 0.15 * clamp(p.y / 0.50, -1.0, 1.0);
-    return sdEllipse(vec2(p.x / taper, p.y), vec2(0.436, 0.50)) * taper;
+    return sdEllipse(vec2(p.x / taper, p.y), vec2(0.410, 0.50)) * taper;
 }
 
 float form(vec2 p, float which) {

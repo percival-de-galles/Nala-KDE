@@ -11,6 +11,9 @@
 #include <QQuickWindow>
 #include <QRect>
 #include <algorithm>
+
+// Mirrors the constant in mascot.cpp; see docs/animation.md.
+static constexpr double kAlertOverleanRef = -0.19;
 #include <utility>
 #include <QTest>
 #include <QTextStream>
@@ -447,6 +450,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   // Timings measured over the 34 blinks in the reference: a 243 ms cycle that
   // shuts completely, spending longer closing than opening.
   {
+    mascot.setIdleAntics(false); // a flourish would move the eyes as well
     mascot.rest();
     mascot.lookIdle();
     const qreal open = mascot.eyeLeftHeight();
@@ -483,6 +487,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
           "a blink takes about as long as the reference's");
     check(closing > opening,
           "her lids close more slowly than they open, as the reference's do");
+    mascot.setIdleAntics(true);
   }
 
   // --- wink ----------------------------------------------------------------
@@ -490,6 +495,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   // The reference holds one eye shut for two or three seconds while the other
   // stays a full slit, then blinks out of it.
   {
+    mascot.setIdleAntics(false);
     mascot.rest();
     mascot.lookIdle();
     const qreal open = mascot.eyeLeftHeight();
@@ -512,6 +518,7 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
       mascot.tick(1.0 / 60.0);
     check(!mascot.winking() && mascot.eyeRightHeight() > open * 0.75,
           "she comes out of a wink");
+    mascot.setIdleAntics(true);
   }
 
   // --- scatter -------------------------------------------------------------
@@ -574,6 +581,118 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
     mascot.tick(0.04);
   check(mascot.badge() > 0.5, "a notification shows the badge");
   check(mascot.eyeWidth() > 0.19, "a notification widens her eyes");
+
+  // --- secondary motion ----------------------------------------------------
+  //
+  // Three things measured off the reference that are easy to get wrong.
+  {
+    const qreal step = 1.0 / 60.0;
+
+    // She breathes: the height/width ratio swells by about 1.2% at 0.31 Hz,
+    // and she sinks as she widens.
+    mascot.rest();
+    mascot.setReducedMotion(false);
+    mascot.setIdleAntics(false); // a flourish would drown out the swell
+    qreal wideX = 0.0, narrowX = 2.0, lowY = -1.0, highY = 1.0;
+    qreal ratioMin = 10.0, ratioMax = 0.0;
+    qreal atWidest = 0.0;
+    for (int i = 0; i < 400; ++i) { // ~6.7 s, two full breaths
+      mascot.tick(step);
+      const qreal ratio = mascot.squashY() / mascot.squashX();
+      if (mascot.squashX() > wideX) {
+        wideX = mascot.squashX();
+        atWidest = mascot.bobY();
+      }
+      narrowX = std::min(narrowX, mascot.squashX());
+      lowY = std::max(lowY, mascot.bobY());
+      highY = std::min(highY, mascot.bobY());
+      ratioMin = std::min(ratioMin, ratio);
+      ratioMax = std::max(ratioMax, ratio);
+    }
+    const qreal swell = (ratioMax - ratioMin) / 2.0;
+    // bobY is in half-item units; on screen it is half that.
+    out << "   idle swell " << swell * 100.0 << "% (reference 1.2-1.8%), "
+        << "rise " << (lowY - highY) / 4.0 << " of the body (reference 0.0136)"
+        << "\n";
+    check(swell > 0.006 && swell < 0.025, "she breathes at rest");
+    check(lowY - highY > 0.02, "and drifts vertically as she does");
+    check(atWidest > 0.0, "she sinks as she widens, rather than rising");
+
+    // Reduced motion means exactly that.
+    mascot.setReducedMotion(true);
+    for (int i = 0; i < 60; ++i)
+      mascot.tick(step);
+    check(qAbs(mascot.bobY()) < 0.001 &&
+              qAbs(mascot.squashX() - 1.0) < 0.001,
+          "reduced motion holds her still");
+    mascot.setReducedMotion(false);
+    mascot.setIdleAntics(true);
+
+    // An alert swings into its lean and stops; the reference never wobbles.
+    mascot.rest();
+    mascot.alert();
+    qreal previous = mascot.roll();
+    const qreal initial = previous;
+    int reversals = 0;
+    for (int i = 0; i < 90; ++i) {
+      mascot.tick(step);
+      const qreal now = mascot.roll();
+      if ((now - previous) * (initial > 0 ? -1.0 : 1.0) < -1e-4)
+        ++reversals;
+      previous = now;
+    }
+    check(qAbs(initial) > 0.1, "an alert arrives under-leaned");
+    check(qAbs(mascot.roll()) < 0.02, "and settles into its lean");
+    check(reversals == 0, "without wobbling on the way");
+
+    mascot.rest();
+    mascot.alert();
+    int settleFrames = 0;
+    while (qAbs(mascot.roll()) > qAbs(kAlertOverleanRef) * 0.05 &&
+           settleFrames < 200) {
+      mascot.tick(step);
+      ++settleFrames;
+    }
+    out << "   alert settles in " << int(settleFrames * step * 1000)
+        << " ms from " << qRound(qAbs(initial) * 180.0 / M_PI)
+        << " deg (reference ~350 ms from 11 deg)\n";
+
+    // Size eases; it does not bounce past where it is going.
+    for (const char *what : {"poke", "wake", "notify"}) {
+      mascot.rest();
+      if (QString::fromLatin1(what) == "poke")
+        mascot.poke();
+      else if (QString::fromLatin1(what) == "notify")
+        mascot.notify();
+      else {
+        mascot.setSleepWhenIdle(true);
+        for (int i = 0; i < 900; ++i)
+          mascot.tick(0.1);
+        mascot.wake();
+      }
+      qreal peak = 0.0;
+      for (int i = 0; i < 180; ++i) {
+        mascot.tick(step);
+        peak = std::max(peak, mascot.bodyScale());
+      }
+      check(peak < 1.02, "her size does not overshoot");
+    }
+
+    mascot.rest();
+    mascot.setSleepWhenIdle(true);
+    for (int i = 0; i < 900; ++i)
+      mascot.tick(0.1);
+    mascot.wake();
+    int rise = 0;
+    while (mascot.bodyScale() < 0.98 && rise < 300) {
+      mascot.tick(step);
+      ++rise;
+    }
+    out << "   size rises to full in " << int(rise * step * 1000)
+        << " ms (reference 583-650)\n";
+    check(rise * step > 0.35 && rise * step < 0.95,
+          "she takes about as long as the reference to swell back");
+  }
 
   // --- sleep ---------------------------------------------------------------
   mascot.setSleepWhenIdle(true);

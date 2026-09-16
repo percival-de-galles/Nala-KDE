@@ -41,6 +41,10 @@ constexpr qreal kTiltDamping = 0.55;
 // the magnitude is noisy, so only part of the geometric angle is applied.
 constexpr qreal kSlitRotation = 0.45;
 
+// How far short of its final lean the exclamation mark arrives: 11 degrees,
+// measured off the reference's first frames.
+constexpr qreal kAlertOverlean = -0.19;
+
 // Base half-extents. The reference keeps a near-constant height/width ratio of
 // about 1.55 whatever direction she looks in.
 constexpr qreal kEyeWidth = 0.170;
@@ -348,7 +352,7 @@ void Mascot::scatter() {
 
   morphTo(Tiny, 0.22);
   m_scale = 1.0;
-  m_scaleVelocity = -1.4;
+  m_scaleVelocity = 0.0;
   m_scaleTarget = 1.0;
   m_hold = 1.5;
 }
@@ -382,7 +386,7 @@ void Mascot::endDash() {
   morphTo(Circle, 0.26);
   // Arrive with a bounce, the way she does at the end of the reference's dash.
   m_scale = 0.72;
-  m_scaleVelocity = 2.2;
+  m_scaleVelocity = 0.0;
   m_scaleTarget = 1.0;
   m_yawTarget = kRestYaw;
   m_pitchTarget = kRestPitch;
@@ -448,10 +452,12 @@ void Mascot::tick(qreal dt) {
   settle(m_badge, m_badgeTarget, dt, 12.0);
   settle(m_rings, m_ringsTarget, dt, 4.5);
 
-  // Body scale uses a real spring so pops overshoot the way the reference does.
+  // Body scale eases rather than bounces. Both of the reference's
+  // re-inflations rise to full over ~600 ms with exactly 0.00% overshoot, so
+  // the spring is damped past critical (2*sqrt(52) = 14.4).
   {
-    const qreal stiffness = m_reduced ? 420.0 : 210.0;
-    const qreal damping = m_reduced ? 42.0 : 19.0;
+    const qreal stiffness = m_reduced ? 220.0 : 52.0;
+    const qreal damping = m_reduced ? 32.0 : 15.5;
     m_scaleVelocity += ((m_scaleTarget - m_scale) * stiffness -
                         m_scaleVelocity * damping) *
                        dt;
@@ -496,19 +502,14 @@ void Mascot::tick(qreal dt) {
   // A squeezed eye spreads sideways as it flattens.
   m_right.scale.setX(m_right.scale.x() * (1.0 + 0.3 * m_winkLid));
 
-  // Idle float and the decaying shake that follows an alert.
-  if (m_reduced) {
+  // The idle swell, and the drift it is coupled to: she sinks as she widens.
+  if (m_reduced || m_mood == Asleep) {
+    m_breathe = 0.0;
     m_bobX = m_bobY = 0.0;
   } else {
-    const qreal breathe = m_mood == Asleep ? 0.0 : 1.0;
-    m_bobY = std::sin(m_time * 1.45) * 0.014 * breathe;
-    m_bobX = std::sin(m_time * 0.93 + 1.1) * 0.006 * breathe;
-  }
-  if (m_wobble > 0.001) {
-    m_wobble = std::max(0.0, m_wobble - dt * 1.6);
-    const qreal shake = std::sin(m_time * 38.0) * m_wobble;
-    m_bobX += shake * 0.05;
-    m_roll += shake * 0.16;
+    m_breathe = std::sin(m_time * kBreatheRate);
+    m_bobY = m_breathe * kBreatheRise;
+    m_bobX = std::sin(m_time * 0.61 + 1.1) * 0.006;
   }
 
   // The trail lags the speed a little, so it streams out as she gets going
@@ -548,7 +549,7 @@ void Mascot::poke() {
   m_squashXTarget = 1.16;
   m_squashYTarget = 0.86;
   m_scale = 0.9;
-  m_scaleVelocity = 1.6;
+  m_scaleVelocity = 0.0;
   m_scaleTarget = 1.0;
   // Eyes go round and wide -- the "delighted" pose from the reference.
   m_eyeWidthTarget = 0.20;
@@ -580,8 +581,13 @@ void Mascot::alert() {
   wake();
   setMood(Alert);
   morphTo(Exclaim, 0.22);
-  m_wobble = 1.0;
-  m_scale = 1.12;
+  // She arrives under-leaned and swings into it over about a third of a
+  // second. The reference does not oscillate at all -- measured frame by
+  // frame it runs -6.6deg -> -11.6 -> -15.9 -> -17.4 and stops -- so this is
+  // a settle, not a shake.
+  m_roll = kAlertOverlean;
+  m_rollTarget = 0.0;
+  m_scale = 1.08;
   m_scaleVelocity = 0.0;
   m_scaleTarget = 1.0;
   m_hold = 2.1;
@@ -599,7 +605,7 @@ void Mascot::notify() {
   m_yawTarget = 0.0;
   m_pitchTarget = 0.12; // looking straight out, a touch downward
   m_scale = 0.94;
-  m_scaleVelocity = 1.1;
+  m_scaleVelocity = 0.0;
   m_scaleTarget = 1.0;
   m_hold = 3.4;
 }
@@ -629,7 +635,8 @@ void Mascot::endDrag(qreal throwSpeed) {
   const qreal impact = qBound(0.0, throwSpeed, 1.0);
   m_squashX = 1.0 + 0.18 * impact;
   m_squashY = 1.0 - 0.16 * impact;
-  m_scaleVelocity = -1.1 * impact;
+  m_scaleVelocity = 0.0;
+  m_scale = 1.0 - 0.12 * impact;
   m_scaleTarget = 1.0;
 }
 
@@ -668,7 +675,6 @@ void Mascot::setReducedMotion(bool reduced) {
     return;
   m_reduced = reduced;
   if (reduced) {
-    m_wobble = 0.0;
     m_bobX = m_bobY = 0.0;
   }
 }
@@ -686,7 +692,6 @@ void Mascot::rest() {
   snapForm(Circle);
   m_hold = 0.0;
   m_idle = 0.0;
-  m_wobble = 0.0;
   m_rings = m_ringsTarget = 0.0;
   m_dashSpeed = m_dashLength = m_dashIntensity = 0.0;
   m_droplets.clear();
@@ -699,6 +704,7 @@ void Mascot::rest() {
   m_scaleVelocity = 0.0;
   m_roll = m_rollTarget = 0.0;
   m_bobX = m_bobY = 0.0;
+  m_breathe = 0.0;
   m_blinkPhase = -1.0;
   scheduleBlink();
   m_eyeWidth = m_eyeWidthTarget = kEyeWidth;
