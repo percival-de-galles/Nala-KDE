@@ -95,3 +95,7 @@ shader never compiles; it detects that and skips the appearance assertions
 rather than failing them. Run `build/nala --self-test` with a display attached
 to exercise those too — they check her proportions against the measurements in
 [docs/animation.md](docs/animation.md).
+
+## License
+
+MIT. See [LICENSE](LICENSE).
