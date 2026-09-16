@@ -514,10 +514,16 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
       mascot.tick(1.0 / 60.0);
     check(mascot.eyeRightHeight() < open * 0.25, "a wink is held");
 
-    for (int i = 0; i < 400; ++i)
+    // She blinks on her own schedule, so look for the eye reaching full height
+    // somewhere in the window rather than at one arbitrary instant.
+    qreal recovered = 0.0;
+    for (int i = 0; i < 400; ++i) {
       mascot.tick(1.0 / 60.0);
-    check(!mascot.winking() && mascot.eyeRightHeight() > open * 0.75,
-          "she comes out of a wink");
+      if (!mascot.winking())
+        recovered = std::max(recovered, mascot.eyeRightHeight());
+    }
+    check(!mascot.winking(), "the wink ends");
+    check(recovered > open * 0.75, "and the eye opens again");
     mascot.setIdleAntics(true);
   }
 

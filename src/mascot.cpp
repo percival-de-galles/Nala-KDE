@@ -705,7 +705,12 @@ void Mascot::rest() {
   m_roll = m_rollTarget = 0.0;
   m_bobX = m_bobY = 0.0;
   m_breathe = 0.0;
+  // Lids too: without this a rest() taken mid-blink leaves an eye half shut,
+  // and anything that measures from here starts off a wrong baseline.
   m_blinkPhase = -1.0;
+  m_winkHold = -1.0;
+  m_winkLid = 0.0;
+  m_left.lid = m_right.lid = 0.0;
   scheduleBlink();
   m_eyeWidth = m_eyeWidthTarget = kEyeWidth;
   m_eyeHeight = m_eyeHeightTarget = kEyeHeight;
