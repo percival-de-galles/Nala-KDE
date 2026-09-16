@@ -30,9 +30,17 @@ class Mascot : public QObject {
   Q_PROPERTY(qreal eyeLeftY READ eyeLeftY NOTIFY frame)
   Q_PROPERTY(qreal eyeRightX READ eyeRightX NOTIFY frame)
   Q_PROPERTY(qreal eyeRightY READ eyeRightY NOTIFY frame)
+  Q_PROPERTY(qreal eyeLeftScaleX READ eyeLeftScaleX NOTIFY frame)
+  Q_PROPERTY(qreal eyeLeftScaleY READ eyeLeftScaleY NOTIFY frame)
+  Q_PROPERTY(qreal eyeRightScaleX READ eyeRightScaleX NOTIFY frame)
+  Q_PROPERTY(qreal eyeRightScaleY READ eyeRightScaleY NOTIFY frame)
+  Q_PROPERTY(qreal eyeLeftAngle READ eyeLeftAngle NOTIFY frame)
+  Q_PROPERTY(qreal eyeRightAngle READ eyeRightAngle NOTIFY frame)
   Q_PROPERTY(qreal eyeWidth READ eyeWidth NOTIFY frame)
   Q_PROPERTY(qreal eyeHeight READ eyeHeight NOTIFY frame)
   Q_PROPERTY(qreal eyeRound READ eyeRound NOTIFY frame)
+  Q_PROPERTY(qreal gazeYaw READ gazeYaw NOTIFY frame)
+  Q_PROPERTY(qreal gazePitch READ gazePitch NOTIFY frame)
 
   Q_PROPERTY(qreal badge READ badge NOTIFY frame)
   Q_PROPERTY(qreal rings READ rings NOTIFY frame)
@@ -72,10 +80,18 @@ public:
   qreal roll() const { return m_roll; }
   qreal bobX() const { return m_bobX; }
   qreal bobY() const { return m_bobY; }
-  qreal eyeLeftX() const { return m_eyeCentre.x() - m_eyeGap * 0.5; }
-  qreal eyeLeftY() const { return m_eyeCentre.y(); }
-  qreal eyeRightX() const { return m_eyeCentre.x() + m_eyeGap * 0.5; }
-  qreal eyeRightY() const { return m_eyeCentre.y(); }
+  qreal eyeLeftX() const { return m_left.position.x(); }
+  qreal eyeLeftY() const { return m_left.position.y(); }
+  qreal eyeRightX() const { return m_right.position.x(); }
+  qreal eyeRightY() const { return m_right.position.y(); }
+  qreal eyeLeftScaleX() const { return m_left.scale.x(); }
+  qreal eyeLeftScaleY() const { return m_left.scale.y(); }
+  qreal eyeRightScaleX() const { return m_right.scale.x(); }
+  qreal eyeRightScaleY() const { return m_right.scale.y(); }
+  qreal eyeLeftAngle() const { return m_left.angle; }
+  qreal eyeRightAngle() const { return m_right.angle; }
+  qreal gazeYaw() const { return m_yaw; }
+  qreal gazePitch() const { return m_pitch; }
   qreal eyeWidth() const { return m_eyeWidth; }
   qreal eyeHeight() const { return m_eyeHeight; }
   qreal eyeRound() const { return m_eyeRound; }
@@ -112,7 +128,7 @@ public:
 
   // Request a form directly. Like every other morph this waits for any
   // transition already in flight, so the silhouette never tears.
-  Q_INVOKABLE void changeForm(int form, qreal seconds = 0.34);
+  Q_INVOKABLE void changeForm(int form, qreal seconds = 0.22);
 
   // Hard reset used by tests and by wake-up: abandon the current transition.
   Q_INVOKABLE void snapForm(int form);
@@ -133,6 +149,7 @@ private:
   void advanceIdle(qreal dt);
   void advanceMorph(qreal dt);
   void settle(qreal &value, qreal target, qreal dt, qreal rate) const;
+  void placeEyes();
   qreal random(qreal lo, qreal hi);
 
   Mood m_mood = Resting;
@@ -152,11 +169,22 @@ private:
   qreal m_roll = 0.0, m_rollTarget = 0.0;
   qreal m_bobX = 0.0, m_bobY = 0.0;
 
-  QPointF m_eyeCentre{0.19, -0.13};
-  QPointF m_eyeTarget{0.19, -0.13};
-  qreal m_eyeGap = 0.47;
-  qreal m_eyeWidth = 0.145, m_eyeHeight = 0.25, m_eyeRound = 1.0;
-  qreal m_eyeWidthTarget = 0.145, m_eyeHeightTarget = 0.25;
+  // Where an eye ended up on screen, and how much the sphere's curvature
+  // squashes it there.
+  struct Eye {
+    QPointF position;
+    QPointF scale{1.0, 1.0};
+    qreal angle = 0.0; // slit rotation, radians
+  };
+  Eye m_left, m_right;
+
+  // The gaze is an orientation, not a translation: the eyes are carried around
+  // a sphere just under the surface of her body.
+  qreal m_yaw = 0.0, m_pitch = 0.0;
+  qreal m_yawTarget = 0.0, m_pitchTarget = 0.0;
+
+  qreal m_eyeWidth = 0.155, m_eyeHeight = 0.26, m_eyeRound = 1.0;
+  qreal m_eyeWidthTarget = 0.155, m_eyeHeightTarget = 0.26;
   qreal m_eyeRoundTarget = 1.0;
 
   qreal m_blinkPhase = -1.0; // <0 means "not blinking"

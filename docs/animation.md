@@ -90,15 +90,45 @@ clipped.
 
 ## Face
 
-| Property | Value |
-| --- | --- |
-| Eye half-width | 0.145 R |
-| Eye half-height | 0.25 R |
-| Eye separation | 0.47 R |
-| Rest position of the pair | (+0.19 R, −0.13 R), i.e. up and to the right |
-| Slit aspect (h / w) | 1.71 |
+**The eyes are features on a sphere, not decals on a flat face.** This is the
+single most important thing about them, and getting it wrong makes her look
+dead no matter how the rest is tuned.
 
-Nala renders at a 0.476 R separation and a 1.73 slit aspect.
+Measured across 169 frames of the idle sections, the pair's separation falls
+away as the gaze swings sideways:
+
+| \|pair centre x\| | 0.00–0.12 | 0.12–0.25 | 0.25–0.38 | 0.38–0.75 |
+| --- | --- | --- | --- | --- |
+| measured gap | 0.560 | 0.519 | 0.468 | 0.432 |
+| sphere model | 0.555 | 0.540 | 0.483 | 0.426 |
+
+Fitting `(x/s)² + (gap/g₀)² = 1` by least squares over the frames where the
+eyes are normally open gives a sphere radius of **s = 0.654 R** with a
+separation at centre of **g₀ = 0.559 R**, i.e. a half-gap angle of 0.442 rad.
+
+| Property | Reference | Nala |
+| --- | --- | --- |
+| Gap looking straight ahead | 0.556 R | 0.561 R |
+| Eye width / height (ahead) | 0.324 / 0.499 R | 0.326 / 0.507 R |
+| Slit aspect (h/w) | 1.54 | 1.56 |
+| Pair travel, horizontal | ±0.63 R | ±0.48 R |
+| Pair travel, vertical | −0.50 to +0.36 R | ±0.45 R |
+| Tilt at a diagonal glance | up to +0.185 | +0.178 |
+
+Three consequences fall out of the sphere and are all visible in the reference:
+
+- **A glance carries the eyes a long way.** Clamping the travel to ±0.34 R, as
+  a flat translation invites, reads as the eyes barely moving.
+- **The pair tilts** once the gaze is both sideways and up or down. Applying
+  yaw before pitch produces this for free; the other order keeps the pair
+  stubbornly level. Only 55% of the geometric tilt is used, or the extremes
+  overshoot what the reference does.
+- **The slits lean** with the sphere's local "up" — right when she looks up,
+  left when she looks down.
+
+Foreshortening is **uniform**, not a true tangent-plane projection: the
+reference holds the height/width ratio at about 1.5 whichever way she looks
+(1.54 near centre, 1.48 far to the side), so both axes shrink together.
 
 Only the circle, egg, hexagon and triangle carry a face. The exclamation mark,
 the teardrop, the "..." run and the sleeping dot are featureless, so the eyes
@@ -106,14 +136,31 @@ fade out across the morph rather than riding along on a shape that has none.
 
 ## Timing
 
-| Behaviour | Value |
-| --- | --- |
-| Blink | ~0.155 s, closing faster than it opens |
-| Blink interval | 2.2–5.4 s |
-| Form morph | 0.30–0.45 s |
-| Idle flourish interval | 9–18 s |
-| Sleep after | 75 s idle |
-| "..." pulse | ~4.4 rad/s, one dot at a time |
+Measured over all 1845 frames: 34 blinks, and 25 stretches where the silhouette
+is changing.
+
+| Behaviour | Reference | Nala |
+| --- | --- | --- |
+| Blink, full cycle | 243 ms | 250 ms |
+| ... closing | 121 ms | slower than opening |
+| ... fully shut | 71 ms | yes, shuts completely |
+| ... opening | 84 ms | faster than closing |
+| Blink interval | 0.6–6.4 s, mean 2.85 s | 0.7–5.2 s |
+| Form morph | mean 200 ms, never over 333 ms | 233 ms |
+| Idle flourish interval | — | 9–18 s |
+| Sleep after | — | 75 s idle |
+| "..." pulse | — | ~4.4 rad/s, one dot at a time |
+
+Two of these are worth calling out because the obvious guess is wrong:
+
+- **A blink closes more slowly than it opens** (121 ms against 84 ms), and
+  holds shut for about 70 ms in between. The instinct to snap shut and ease
+  open is backwards.
+- **The lids shut completely.** The eyes vanish at the bottom of a blink rather
+  than flattening to a slit.
+
+The `--self-test` run prints its own measured blink cycle and morph duration
+against these figures, so a change in easing shows up immediately.
 
 ## The "..." run
 

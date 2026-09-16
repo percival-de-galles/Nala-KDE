@@ -27,9 +27,15 @@ layout(std140, binding = 0) uniform buf {
     float bodyScale;
     float roll;
 
-    // Eyes, in units of the body radius, relative to the body centre.
+    // Eyes, in units of the body radius, relative to the body centre. Each
+    // carries its own scale because the two sit at different places on the
+    // sphere and so foreshorten by different amounts.
     vec2 eyeLeft;
     vec2 eyeRight;
+    vec2 eyeLeftScale;
+    vec2 eyeRightScale;
+    float eyeLeftAngle;
+    float eyeRightAngle;
     float eyeWidth;
     float eyeHeight;
     float eyeRound;
@@ -99,6 +105,10 @@ float smoothUnion(float a, float b, float k) {
 
 // The "..." run. At spread 0 with a full core this is exactly the idle circle,
 // which is what makes the collapse into three dots one continuous motion.
+float dotCore() { return mix(kRadius, kDotCore, dotsShrink); }
+float dotSide() { return kDotSide * dotsSpread; }
+float dotGap() { return kDotGap * dotsSpread; }
+
 float sdDots(vec2 p, float spread, float shrink) {
     float core = mix(kRadius, kDotCore, shrink);
     float side = kDotSide * spread;
@@ -109,19 +119,34 @@ float sdDots(vec2 p, float spread, float shrink) {
     return d;
 }
 
+float dotWave(int i) {
+    float w = max(0.0, cos(dotsPhase - float(i) * 2.0943951));
+    return 0.34 + 0.66 * w * w;
+}
+
 // In the reference the three dots pulse in turn, so the run reads as a
 // progress indicator rather than as punctuation.
+//
+// A pixel takes the emphasis of the dot it actually belongs to -- picked by
+// smallest distance field, not nearest centre. While the core is still most of
+// her body the two side dots sit inside it, and going by centres would hand
+// half the body to them and grey it out on the way in.
 float dotsEmphasis(vec2 p) {
-    float best = 1e9;
-    float emphasis = 1.0;
-    for (int i = 0; i < 3; ++i) {
-        float d = length(p - vec2(float(i - 1) * kDotGap, 0.0));
-        if (d < best) {
-            best = d;
-            float wave = cos(dotsPhase - float(i) * 2.0943951);
-            emphasis = 0.34 + 0.66 * max(0.0, wave) * max(0.0, wave);
-        }
-    }
+    float core = dotCore(), side = dotSide(), gap = dotGap();
+
+    // The core only joins the pulse once it is genuinely a dot; until then it
+    // is still her body, and her body is solid.
+    float formed = smoothstep(0.80, 1.0, dotsShrink);
+
+    float best = sdCircle(p, core);
+    float emphasis = mix(1.0, dotWave(1), formed);
+
+    float dLeft = sdCircle(p + vec2(gap, 0.0), side);
+    if (dLeft < best) { best = dLeft; emphasis = dotWave(0); }
+
+    float dRight = sdCircle(p - vec2(gap, 0.0), side);
+    if (dRight < best) { best = dRight; emphasis = dotWave(2); }
+
     return emphasis;
 }
 
@@ -177,10 +202,10 @@ float faceWeight(float which) {
 
 // A single eye: a rounded vertical slit that can flatten to a blink dash or
 // open out into a near-circle.
-float sdEye(vec2 p, vec2 centre) {
-    vec2 extent = vec2(eyeWidth, eyeHeight) * kRadius;
+float sdEye(vec2 p, vec2 centre, vec2 squash, float lean) {
+    vec2 extent = vec2(eyeWidth, eyeHeight) * squash * kRadius;
     float r = min(extent.x, extent.y) * eyeRound;
-    return sdRoundBox(p - centre * kRadius, extent, r);
+    return sdRoundBox(rotate(p - centre * kRadius, lean), extent, r);
 }
 
 void main() {
@@ -201,8 +226,9 @@ void main() {
 
     float bodyMask = clamp(0.5 - body / px, 0.0, 1.0);
 
-    float eyes = min(sdEye(p, vec2(eyeLeft.x, -eyeLeft.y)),
-                     sdEye(p, vec2(eyeRight.x, -eyeRight.y)));
+    float eyes = min(
+        sdEye(p, vec2(eyeLeft.x, -eyeLeft.y), eyeLeftScale, eyeLeftAngle),
+        sdEye(p, vec2(eyeRight.x, -eyeRight.y), eyeRightScale, eyeRightAngle));
     // Eyes only exist where there is body to carve them out of, and only on
     // the forms that have a face at all.
     float face = mix(faceWeight(formA), faceWeight(formB), formMix);
@@ -218,9 +244,25 @@ void main() {
     // Fade the quiet dots rather than greying them: on a dark desktop a fixed
     // grey would read as a smudge, while lower opacity reads correctly on any
     // wallpaper.
-    float dotsWeight = mix(isDots(formA), isDots(formB), formMix);
-    if (dotsWeight > 0.001)
-        alpha *= mix(1.0, dotsEmphasis(p), dotsWeight * dotsSpread);
+    // Gate on how far the core has actually collapsed, not on the morph: while
+    // the body is still a body it must stay solid, or the whole silhouette
+    // turns translucent on the way into the run.
+    float dotsWeight = mix(isDots(formA), isDots(formB), formMix) *
+                       smoothstep(0.15, 0.55, dotsSpread);
+    if (dotsWeight > 0.001) {
+        // On the way in only the emerging side dots are quiet; the core is
+        // still her body, and her body is solid. Once the core has become a
+        // dot in its own right it joins the pulse. Testing against the side
+        // dots' own fields -- rather than against the blended silhouette,
+        // which reaches past them -- is what keeps the body from dimming.
+        float gap = dotGap(), side = dotSide();
+        float dSide = min(sdCircle(p + vec2(gap, 0.0), side),
+                          sdCircle(p - vec2(gap, 0.0), side));
+        float inSide = 1.0 - step(0.0, dSide);
+        float formed = smoothstep(0.80, 1.0, dotsShrink);
+        float apply = dotsWeight * max(formed, inSide);
+        alpha *= mix(1.0, dotsEmphasis(p), apply);
+    }
 
     vec3 rgb = bodyColor.rgb;
     rgb = mix(rgb, eyeColor.rgb, eyeMask);

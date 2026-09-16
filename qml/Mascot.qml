@@ -78,6 +78,10 @@ Window {
 
             property vector2d eyeLeft: Qt.vector2d(mascot.eyeLeftX, mascot.eyeLeftY)
             property vector2d eyeRight: Qt.vector2d(mascot.eyeRightX, mascot.eyeRightY)
+            property vector2d eyeLeftScale: Qt.vector2d(mascot.eyeLeftScaleX, mascot.eyeLeftScaleY)
+            property vector2d eyeRightScale: Qt.vector2d(mascot.eyeRightScaleX, mascot.eyeRightScaleY)
+            property real eyeLeftAngle: mascot.eyeLeftAngle
+            property real eyeRightAngle: mascot.eyeRightAngle
             property real eyeWidth: mascot.eyeWidth
             property real eyeHeight: mascot.eyeHeight
             property real eyeRound: mascot.eyeRound

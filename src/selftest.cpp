@@ -11,6 +11,7 @@
 #include <QQuickWindow>
 #include <QRect>
 #include <algorithm>
+#include <utility>
 #include <QTest>
 #include <QTextStream>
 
@@ -53,6 +54,9 @@ int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
   QTest::qWait(500);
 
   const auto shoot = [&](const QString &name) {
+    // Never catch her mid-blink: a captured pose should be comparable.
+    for (int i = 0; i < 60 && mascot.eyeHeight() < 0.2; ++i)
+      mascot.tick(1.0 / 60.0);
     orbits.setIntensity(mascot.rings()); // never inherit the previous pose
     window->requestUpdate();
     QTest::qWait(90);
@@ -79,6 +83,43 @@ int capturePoses(QApplication &app, Mascot &mascot, Orbits &orbits,
     for (int i = 0; i < 40; ++i)
       mascot.tick(0.04); // let the dots spread and the springs settle
     shoot(pose.name);
+  }
+
+  // Transition sequences: five evenly-spaced frames through a morph, so the
+  // in-between shapes can be checked against the reference's own frames.
+  mascot.setReducedMotion(false);
+  for (const auto &t : {std::pair<const char *, int>{"seq-dots", Mascot::Dots},
+                        {"seq-exclaim", Mascot::Exclaim},
+                        {"seq-triangle", Mascot::Triangle}}) {
+    mascot.rest();
+    mascot.changeForm(t.second);
+    // The morph runs 0.22 s; sample it at 0, 25, 50, 75 and 100 per cent.
+    const qreal step = 0.22 / 4.0;
+    for (int i = 0; i < 5; ++i) {
+      shoot(QStringLiteral("%1-%2").arg(t.first).arg(i));
+      for (int f = 0; f < 4; ++f)
+        mascot.tick(step / 4.0);
+    }
+  }
+  mascot.setReducedMotion(true);
+
+  // Gaze poses, for checking the eyes against the reference.
+  for (const auto &g : {std::pair<const char *, std::pair<qreal, qreal>>
+                            {"gaze-ahead", {0.0, 0.0}},
+                        {"gaze-left", {-6.0, 0.0}},
+                        {"gaze-right", {6.0, 0.0}},
+                        {"gaze-up", {0.0, -6.0}},
+                        {"gaze-down", {0.0, 6.0}},
+                        {"gaze-upright", {4.0, -4.0}},
+                        {"gaze-rest", {0.0, 0.0}}}) {
+    mascot.rest();
+    if (QString::fromLatin1(g.first) == "gaze-rest")
+      mascot.lookIdle();
+    else
+      mascot.lookAt(g.second.first, g.second.second);
+    for (int i = 0; i < 60; ++i)
+      mascot.tick(0.04);
+    shoot(g.first);
   }
 
   // Expression states on the idle body.
@@ -229,15 +270,14 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   check(trackedRight > (mascot.eyeLeftX() + mascot.eyeRightX()) * 0.5,
         "a cursor reported by the compositor moves her gaze");
 
-  // A cursor sitting exactly on her should leave the gaze centred; if the
-  // centre were computed from the wrong origin this would be skewed.
+  // A cursor sitting exactly on her should leave the gaze pointing straight
+  // out; if the centre were computed from the wrong origin this would skew.
   backend.injectCursor(int(centre.x()), int(centre.y()));
   for (int i = 0; i < 20; ++i)
     mascot.tick(0.05);
   const qreal centredX = (mascot.eyeLeftX() + mascot.eyeRightX()) * 0.5;
   const qreal centredY = (mascot.eyeLeftY() + mascot.eyeRightY()) * 0.5;
-  check(qAbs(centredX - 0.19 * 0.45) < 0.06 &&
-            qAbs(centredY - (-0.13 * 0.45)) < 0.06,
+  check(qAbs(centredX) < 0.06 && qAbs(centredY) < 0.06,
         "a cursor on top of her leaves the gaze centred");
 
   backend.injectCursor(int(centre.x()), int(centre.y()) + 600);
@@ -246,10 +286,66 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   check((mascot.eyeLeftY() + mascot.eyeRightY()) * 0.5 > centredY + 0.05,
         "a cursor below her pulls the gaze down");
 
+  // The eyes are carried on a sphere, so the reference shows three things a
+  // flat translation cannot produce. All three were measured off the video.
+  {
+    const auto settleGaze = [&] {
+      for (int i = 0; i < 40; ++i)
+        mascot.tick(0.05);
+    };
+
+    mascot.lookAt(0.0, 0.0);
+    settleGaze();
+    const qreal gapAhead = mascot.eyeRightX() - mascot.eyeLeftX();
+
+    mascot.lookAt(6.0, 0.0);
+    settleGaze();
+    const qreal gapAside = mascot.eyeRightX() - mascot.eyeLeftX();
+    const qreal reach = (mascot.eyeLeftX() + mascot.eyeRightX()) * 0.5;
+
+    check(gapAside < gapAhead * 0.85,
+          "the eyes draw together as the gaze swings aside");
+    // The old flat-eye model topped out at 0.34 R, which read as barely
+    // moving. The fitted sphere carries the pair to about 0.48 R.
+    check(reach > 0.42,
+          "a glance carries the eyes as far as the reference does");
+    check(mascot.eyeRightScaleX() < 0.9,
+          "an eye foreshortens as it approaches the edge");
+
+    mascot.lookAt(4.0, 4.0);
+    settleGaze();
+    check(qAbs(mascot.eyeRightY() - mascot.eyeLeftY()) > 0.02,
+          "the pair tilts when the gaze is both aside and down");
+
+    mascot.lookAt(0.0, 0.0);
+    settleGaze();
+    check(qAbs(mascot.eyeRightY() - mascot.eyeLeftY()) < 0.02,
+          "the pair is level when looking straight ahead");
+  }
+
   mascot.lookIdle();
   mascot.setReducedMotion(false);
 
   // --- morphing ------------------------------------------------------------
+  // Transitions in the reference run 0.20 s on average and never exceed
+  // 0.33 s, so nothing here should be slower than that.
+  {
+    mascot.rest();
+    const qreal step = 1.0 / 60.0;
+    mascot.changeForm(Mascot::Triangle);
+    int frames = 0;
+    while (mascot.formMix() < 1.0 && frames < 120) {
+      mascot.tick(step);
+      ++frames;
+    }
+    const qreal seconds = frames * step;
+    out << "   default morph " << int(seconds * 1000)
+        << " ms (reference 200, never over 333)\n";
+    check(seconds <= 0.34, "a morph is no slower than the reference's");
+    check(seconds >= 0.12, "a morph is not instant");
+  }
+
+  mascot.rest();
   mascot.changeForm(Mascot::Hex, 0.4);
   mascot.tick(0.06);
   check(mascot.formMix() > 0.0 && mascot.formMix() < 1.0,
@@ -272,15 +368,46 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   check(mascot.formB() == Mascot::Circle, "the queued morph then runs");
 
   // --- blink ---------------------------------------------------------------
+  //
+  // Timings measured over the 34 blinks in the reference: a 243 ms cycle that
+  // shuts completely, spending longer closing than opening.
   {
-    qreal minimum = 1.0, maximum = 0.0;
-    for (int i = 0; i < 400; ++i) { // ~6 s, long enough to contain a blink
-      mascot.tick(1.0 / 60.0);
-      minimum = std::min(minimum, mascot.eyeHeight());
-      maximum = std::max(maximum, mascot.eyeHeight());
+    mascot.rest();
+    mascot.lookIdle();
+    const qreal open = mascot.eyeHeight();
+    const qreal step = 1.0 / 60.0;
+
+    int closing = 0, opening = 0, shut = 0;
+    bool seen = false, past = false;
+    qreal minimum = open;
+    for (int i = 0; i < 1200 && !past; ++i) { // up to 20 s
+      mascot.tick(step);
+      const qreal h = mascot.eyeHeight();
+      minimum = std::min(minimum, h);
+      if (h < open * 0.92) {
+        seen = true;
+        if (h < open * 0.06)
+          ++shut;
+        else if (shut == 0)
+          ++closing;
+        else
+          ++opening;
+      } else if (seen) {
+        past = true;
+      }
     }
-    check(minimum < 0.09, "eyes close during a blink");
-    check(maximum > 0.20, "eyes reopen after a blink");
+
+    check(seen, "she blinks");
+    check(minimum < open * 0.05, "a blink shuts her eyes completely");
+
+    const qreal cycle = (closing + shut + opening) * step;
+    out << "   blink cycle " << int(cycle * 1000) << " ms (reference 243), "
+        << "closing " << int(closing * step * 1000) << " ms vs opening "
+        << int(opening * step * 1000) << " ms (reference 121 vs 84)\n";
+    check(cycle > 0.18 && cycle < 0.32,
+          "a blink takes about as long as the reference's");
+    check(closing > opening,
+          "her lids close more slowly than they open, as the reference's do");
   }
 
   // --- reactions -----------------------------------------------------------
