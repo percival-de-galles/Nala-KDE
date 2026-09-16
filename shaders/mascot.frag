@@ -234,7 +234,9 @@ void main() {
     float face = mix(faceWeight(formA), faceWeight(formB), formMix);
     float eyeMask = clamp(0.5 - eyes / px, 0.0, 1.0) * bodyMask * face;
 
-    float badgeD = sdCircle(p - vec2(0.375, 0.375), 0.115 * badge);
+    // Measured on the reference: radius 0.142 R, centred 1.008 R out from her
+    // middle at 41.8 degrees -- so it sits right on the rim.
+    float badgeD = sdCircle(p - vec2(0.397, 0.354), 0.0751 * badge);
     float badgeMask = badge > 0.001 ? clamp(0.5 - badgeD / px, 0.0, 1.0) : 0.0;
 
     // The badge sits on the rim and pokes outside the silhouette, so it

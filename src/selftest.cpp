@@ -563,6 +563,37 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
   check(mascot.squashX() > 1.0 && mascot.squashY() < 1.0,
         "a click squashes her on impact");
 
+  // The rings come up fast and fade slowly: 117 ms against 683 ms.
+  mascot.rest();
+  mascot.think(6.0);
+  int ringsUp = 0;
+  while (mascot.rings() < 0.8 && ringsUp < 120) {
+    mascot.tick(1.0 / 60.0);
+    ++ringsUp;
+  }
+  const qreal tumbleStart = mascot.roll();
+  for (int i = 0; i < 120; ++i)
+    mascot.tick(1.0 / 60.0);
+  const qreal tumbled = (mascot.roll() - tumbleStart) / 2.0;
+  out << "   rings up in " << int(ringsUp / 60.0 * 1000)
+      << " ms (reference 117), tumble " << tumbled << " rad/s (reference 1.015)"
+      << "\n";
+  check(ringsUp / 60.0 < 0.22, "the rings come up quickly");
+  check(tumbled > 0.7 && tumbled < 1.3, "she tumbles at the reference's rate");
+
+  mascot.rest();
+  int ringsDown = 0;
+  mascot.think(0.1);
+  for (int i = 0; i < 30; ++i)
+    mascot.tick(1.0 / 60.0);
+  while (mascot.rings() > 0.2 && ringsDown < 180) {
+    mascot.tick(1.0 / 60.0);
+    ++ringsDown;
+  }
+  out << "   rings fade over " << int(ringsDown / 60.0 * 1000)
+      << " ms (reference 683)\n";
+  check(ringsDown / 60.0 > 0.35, "and fade away slowly");
+
   mascot.think(4.0);
   for (int i = 0; i < 30; ++i)
     mascot.tick(0.04);
@@ -583,8 +614,23 @@ int runSelfTest(QApplication &app, Backend &backend, Mascot &mascot,
     mascot.tick(0.04);
 
   mascot.notify();
-  for (int i = 0; i < 20; ++i)
-    mascot.tick(0.04);
+  {
+    // The badge pops: measured on the reference it overshoots its settled size
+    // by 19.5% about a third of a second in.
+    qreal peak = 0.0;
+    int toPeak = 0;
+    for (int i = 0; i < 120; ++i) {
+      mascot.tick(1.0 / 60.0);
+      if (mascot.badge() > peak) {
+        peak = mascot.badge();
+        toPeak = i;
+      }
+    }
+    out << "   badge peaks at " << qRound((peak - 1.0) * 100.0) << "% over, "
+        << int(toPeak / 60.0 * 1000) << " ms in (reference +19.5%, ~330 ms)\n";
+    check(peak > 1.08 && peak < 1.35, "the badge pops as it arrives");
+    check(qAbs(mascot.badge() - 1.0) < 0.06, "and settles at its full size");
+  }
   check(mascot.badge() > 0.5, "a notification shows the badge");
   check(mascot.eyeWidth() > 0.19, "a notification widens her eyes");
 

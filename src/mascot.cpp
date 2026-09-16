@@ -17,8 +17,11 @@ namespace {
 //   |pair x|   0.00-0.12  0.12-0.25  0.25-0.38  0.38-0.75
 //   measured       0.560      0.519      0.468      0.432
 //   model          0.555      0.540      0.483      0.426
-constexpr qreal kEyeSphere = 0.654;
-constexpr qreal kEyeHalfGap = 0.442; // half the angular separation, radians
+// The fit's two axes are s*cos(g) = 0.654 and 2*s*sin(g) = 0.559, not s and
+// the gap themselves -- reading them off directly leaves the gaze travelling
+// 10% short of the reference.
+constexpr qreal kEyeSphere = 0.711;
+constexpr qreal kEyeHalfGap = 0.404; // half the angular separation, radians
 
 // Rest orientation, and how far a glance can carry the gaze. The reference
 // sweeps the pair centre across roughly ±0.63 R horizontally and ±0.50 R
@@ -44,6 +47,13 @@ constexpr qreal kSlitRotation = 0.45;
 // How far short of its final lean the exclamation mark arrives: 11 degrees,
 // measured off the reference's first frames.
 constexpr qreal kAlertOverlean = -0.19;
+
+// Rings: 117 ms to reach full, 683 ms to fade away again.
+constexpr qreal kRingsRise = 13.8;
+constexpr qreal kRingsFall = 2.7;
+
+// Body tumble while thinking: +122 deg over 2.10 s.
+constexpr qreal kTumbleRate = 1.015; // rad/s
 
 // Base half-extents. The reference keeps a near-constant height/width ratio of
 // about 1.55 whatever direction she looks in.
@@ -449,8 +459,20 @@ void Mascot::tick(qreal dt) {
   settle(m_squashX, m_squashXTarget, dt, 11.0);
   settle(m_squashY, m_squashYTarget, dt, 11.0);
   settle(m_roll, m_rollTarget, dt, 8.0);
-  settle(m_badge, m_badgeTarget, dt, 12.0);
-  settle(m_rings, m_ringsTarget, dt, 4.5);
+  // The rings come up in 117 ms and take 683 ms to fade: sharply asymmetric,
+  // so one rate cannot serve for both.
+  settle(m_rings, m_ringsTarget, dt,
+         m_ringsTarget > m_rings ? kRingsRise : kRingsFall);
+
+  // The badge pops. It overshoots its settled size by 19.5% about a third of
+  // a second in, so it needs a spring rather than an approach.
+  {
+    m_badgeVelocity += ((m_badgeTarget - m_badge) * 115.0 -
+                        m_badgeVelocity * 9.9) * dt;
+    m_badge = std::max(0.0, m_badge + m_badgeVelocity * dt);
+    if (m_badge <= 0.0 && m_badgeTarget <= 0.0)
+      m_badgeVelocity = 0.0;
+  }
 
   // Body scale eases rather than bounces. Both of the reference's
   // re-inflations rise to full over ~600 ms with exactly 0.00% overshoot, so
@@ -518,9 +540,13 @@ void Mascot::tick(qreal dt) {
          m_mood == Dashing ? 11.0 : 6.0);
   settle(m_dashIntensity, m_mood == Dashing ? 1.0 : 0.0, dt, 9.0);
 
-  // Slow tumble while she is thinking.
+  // Tumble while she is thinking. Measured over the reference's thinking
+  // stretch: +122 degrees in 2.10 s. It accumulates in its own term, then
+  // unwinds once she stops -- by which point she is a circle again anyway.
   if (m_rings > 0.02 && !m_reduced)
-    m_roll += dt * 0.55 * m_rings;
+    m_tumble += dt * kTumbleRate * m_rings;
+  else
+    settle(m_tumble, 0.0, dt, 3.0);
 
   emit frame();
 }
@@ -598,9 +624,9 @@ void Mascot::notify() {
   setMood(Notifying);
   morphTo(Circle, 0.20);
   m_badgeTarget = 1.0;
-  // Wide, round, surprised eyes.
-  m_eyeWidthTarget = 0.215;
-  m_eyeHeightTarget = 0.235;
+  // Wide, round, surprised eyes: measured 0.442 x 0.495 R on the reference.
+  m_eyeWidthTarget = 0.228;
+  m_eyeHeightTarget = 0.257;
   m_eyeRoundTarget = 1.0;
   m_yawTarget = 0.0;
   m_pitchTarget = 0.12; // looking straight out, a touch downward
@@ -696,6 +722,7 @@ void Mascot::rest() {
   m_dashSpeed = m_dashLength = m_dashIntensity = 0.0;
   m_droplets.clear();
   m_badge = m_badgeTarget = 0.0;
+  m_badgeVelocity = 0.0;
   m_dotsSpread = m_dotsSpreadTarget = 0.0;
   m_dotsShrink = m_dotsShrinkTarget = 0.0;
   m_dotsPhase = 0.0;
@@ -703,6 +730,7 @@ void Mascot::rest() {
   m_scale = m_scaleTarget = 1.0;
   m_scaleVelocity = 0.0;
   m_roll = m_rollTarget = 0.0;
+  m_tumble = 0.0;
   m_bobX = m_bobY = 0.0;
   m_breathe = 0.0;
   // Lids too: without this a rest() taken mid-blink leaves an eye half shut,

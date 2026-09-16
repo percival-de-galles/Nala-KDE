@@ -25,7 +25,7 @@ QVector3D orthogonal(const QVector3D &v) {
 
 Orbits::Orbits(QObject *parent) : QObject(parent) {
   auto *rng = QRandomGenerator::global();
-  const int count = 7;
+  const int count = 6;
   m_rings.reserve(count);
   for (int i = 0; i < count; ++i) {
     Ring ring;
@@ -50,13 +50,17 @@ Orbits::Orbits(QObject *parent) : QObject(parent) {
     ring.phase = rng->generateDouble() * 2.0 * M_PI;
     ring.speed = (rng->generateDouble() * 0.9 + 0.55) *
                  (rng->bounded(2) ? 1.0 : -1.0);
-    // Close to a complete orbit: short arcs read as scribbles rather than as
-    // something circling her.
-    ring.span = M_PI * (1.55 + rng->generateDouble() * 0.45);
+    // Partial, and varied: measured across the reference's thinking frames the
+    // arcs cover 0.68 +- 0.18 R^2 between them, which near-complete orbits
+    // overshoot by more than double. They read as arcs rather than scribbles
+    // because the stroke barely tapers, not because they are long.
+    ring.span = M_PI * (0.6 + rng->generateDouble() * 0.85);
     // A fraction of the item's half-extent, so the arcs keep their weight
     // when Nala is scaled up or down.
-    // Measured against the reference: roughly 1% of the item's half-extent.
-    ring.thickness = 0.010 + rng->generateDouble() * 0.011;
+    // Measured on a reference thinking frame: the median stroke run is
+    // 0.059 R, which is 0.031 of the item's half-extent. Eyeballing this
+    // earlier put it at half that, and the arcs read as thin scratches.
+    ring.thickness = 0.018 + rng->generateDouble() * 0.015;
     ring.color = QColor::fromHsvF(qreal(i) / count, kSaturation, kValue);
     m_rings.append(ring);
   }

@@ -162,6 +162,37 @@ full over 583 ms and 650 ms with an overshoot of exactly 0.00%, so the scale
 spring is damped past critical. The elasticity lives in the squash, not in the
 size.
 
+## The extras
+
+**The notification badge pops.** Measured over its one clean appearance in the
+reference (t = 8.90-10.08 s):
+
+| Property | Value |
+| --- | --- |
+| Settled radius | 0.142 R |
+| Centre | 1.008 R from her middle, at 41.8 deg |
+| Growth | peaks about 330 ms in |
+| Overshoot | **+19.5%** before settling |
+
+So it needs a spring rather than an approach. Nala renders at 0.142 R, 1.008 R
+and 41.7 deg, peaking 18% over at 300 ms.
+
+Her eyes go wide with it: 0.442 x 0.495 R against the 0.324 x 0.499 R of her
+resting slits.
+
+**The orbit arcs are sharply asymmetric.** They reach full in **117 ms** and
+take **683 ms** to fade -- one rate cannot serve both. Their stroke is 0.059 R,
+about twice what it looks like by eye, and between them they cover
+0.68 +- 0.18 R^2 (range 0.35-1.04 across the thinking stretch). That last
+figure is the one that matters: near-complete orbits overshoot it by more than
+double, so the arcs are partial. They read as arcs rather than as scribbles
+because the stroke barely tapers, not because they are long.
+
+**She tumbles while thinking** at +122 deg over 2.10 s, i.e. 1.015 rad/s. This
+has to accumulate in a term of its own: folded into the roll, which settles
+towards a target, it is simply pulled back out again every frame and she never
+turns at all.
+
 ## Timing
 
 Measured over all 1845 frames: 34 blinks, and 25 stretches where the silhouette

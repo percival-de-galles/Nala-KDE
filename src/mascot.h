@@ -93,7 +93,9 @@ public:
   qreal squashX() const { return m_squashX * (1.0 + kBreatheDepth * m_breathe); }
   qreal squashY() const { return m_squashY * (1.0 - kBreatheDepth * m_breathe); }
   qreal bodyScale() const { return m_scale; }
-  qreal roll() const { return m_roll; }
+  // The settling lean plus whatever she has spun through while thinking.
+  qreal roll() const { return m_roll + m_tumble; }
+  qreal lean() const { return m_roll; }
   qreal bobX() const { return m_bobX; }
   qreal bobY() const { return m_bobY; }
   qreal eyeLeftX() const { return m_left.position.x(); }
@@ -209,6 +211,9 @@ private:
   qreal m_squashXTarget = 1.0, m_squashYTarget = 1.0;
   qreal m_scale = 1.0, m_scaleTarget = 1.0, m_scaleVelocity = 0.0;
   qreal m_roll = 0.0, m_rollTarget = 0.0;
+  // Kept apart from m_roll: the roll settles towards a target, and a spin
+  // folded into it would simply be pulled back out again every frame.
+  qreal m_tumble = 0.0;
   qreal m_bobX = 0.0, m_bobY = 0.0;
 
   // Where an eye ended up on screen, and how much the sphere's curvature
@@ -250,7 +255,7 @@ private:
   qreal m_dashAngle = 0.0, m_dashSpeed = 0.0;
   qreal m_dashLength = 0.0, m_dashIntensity = 0.0;
 
-  qreal m_badge = 0.0, m_badgeTarget = 0.0;
+  qreal m_badge = 0.0, m_badgeTarget = 0.0, m_badgeVelocity = 0.0;
   qreal m_rings = 0.0, m_ringsTarget = 0.0;
 
   qreal m_time = 0.0;
